@@ -53,8 +53,20 @@ export const MemoryPlugin: Plugin = async (input, options) => {
     })
   }
 
-  // 4. Track recall results per session for injection
+  // 4. Track recall results per session for injection (bounded to avoid leaks)
   const sessionRecallCache = new Map<string, ScopedRecallResult>()
+  const MAX_RECALL_CACHE_SIZE = 100
+
+  function setRecallCache(sessionID: string, result: ScopedRecallResult): void {
+    if (sessionRecallCache.size >= MAX_RECALL_CACHE_SIZE && !sessionRecallCache.has(sessionID)) {
+      // Map preserves insertion order; evict oldest entry (LRU fallback)
+      const oldestKey = sessionRecallCache.keys().next().value as string | undefined
+      if (oldestKey !== undefined) {
+        sessionRecallCache.delete(oldestKey)
+      }
+    }
+    sessionRecallCache.set(sessionID, result)
+  }
 
   // 5. Track if extraction already ran for a session
   const extractedSessions = new Set<string>()
@@ -133,7 +145,7 @@ export const MemoryPlugin: Plugin = async (input, options) => {
         if (userStore) {
           void recallMemoriesMultiScope(query, userStore, store, config, client)
             .then((result) => {
-              sessionRecallCache.set(input.sessionID, result)
+              setRecallCache(input.sessionID, result)
             })
             .catch(() => {
               /* Silent failure — recall is best-effort */
@@ -141,7 +153,7 @@ export const MemoryPlugin: Plugin = async (input, options) => {
         } else {
           void recallMemories(query, store, config, client)
             .then((result) => {
-              sessionRecallCache.set(input.sessionID, {
+              setRecallCache(input.sessionID, {
                 ...result,
                 userMemories: [],
                 projectMemories: result.memories,
@@ -154,10 +166,10 @@ export const MemoryPlugin: Plugin = async (input, options) => {
       } else {
         if (userStore) {
           const result = await recallMemoriesMultiScope(query, userStore, store, config, client)
-          sessionRecallCache.set(input.sessionID, result)
+          setRecallCache(input.sessionID, result)
         } else {
           const result = await recallMemories(query, store, config, client)
-          sessionRecallCache.set(input.sessionID, {
+          setRecallCache(input.sessionID, {
             ...result,
             userMemories: [],
             projectMemories: result.memories,
