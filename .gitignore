@@ -1,5 +1,37 @@
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Lock files (runtime state, not source)
 *.lock
 .consolidate-lock
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# OS files
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test output
+*.lcov
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+logs/
