@@ -1,0 +1,66 @@
+{
+  "$comment": "opencode-memory plugin configuration. Edit this file to tune models, thresholds, and feature scheduling.",
+
+  "enabled": true,
+  "storage": "filesystem",
+
+  "features": {
+    "recall": {
+      "$comment": "Two-stage recall: rule filter (free) + LLM rerank (one call)",
+      "enabled": true,
+      "agent": "explore",
+      "background": true,
+      "llm_rerank": true,
+      "max_candidates": 20,
+      "max_results": 5,
+      "max_tokens": 256,
+      "min_query_length": 5
+    },
+
+    "extraction": {
+      "$comment": "KAIROS mode: main agent appends logs, extraction runs on session.idle",
+      "enabled": true,
+      "category": "quick",
+      "min_tokens_to_init": 10000,
+      "min_tokens_between_update": 5000,
+      "max_section_length": 2000,
+      "max_total_tokens": 12000
+    },
+
+    "dream": {
+      "$comment": "Periodic consolidation: Orient -> Gather -> Consolidate -> Prune",
+      "enabled": true,
+      "category": "deep",
+      "min_hours_since_last": 24,
+      "min_sessions_since_last": 5,
+      "lock_stale_timeout_ms": 3600000
+    },
+
+    "staleness": {
+      "warn_after_days": 1
+    },
+
+    "scope": {
+      "$comment": "Cross-project memory: user scope stores global preferences, project scope stores per-project context",
+      "user_scope_enabled": true,
+      "project_overrides_user": true
+    }
+  },
+
+  "models": {
+    "$comment": "Model overrides per task. If omitted, uses oh-my-openagent agent/category defaults. These take priority over agent/category.",
+    "recall": null,
+    "extraction": null,
+    "dream": null
+  },
+
+  "entrypoint": {
+    "max_lines": 200,
+    "max_bytes": 25000
+  },
+
+  "scan": {
+    "max_files": 200,
+    "frontmatter_max_lines": 30
+  }
+}

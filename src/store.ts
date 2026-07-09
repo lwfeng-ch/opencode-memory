@@ -1,0 +1,209 @@
+/**
+ * opencode-memory — MemoryStore interface
+ *
+ * Storage/Runtime decoupling. All memory operations go through this
+ * interface. Current implementation: FileSystemStore (Markdown files).
+ * Future: SqliteStore, VectorStore, McpRemoteStore.
+ *
+ * Design principle: the store knows nothing about models, agents, or
+ * OpenCode hooks. It is a pure data layer.
+ */
+
+import { join, basename, isAbsolute } from "path"
+import { mkdir, readdir, readFile, writeFile, unlink, stat, appendFile } from "fs/promises"
+import type { MemoryHeader } from "./config.js"
+import { parseConfidence } from "./config.js"
+
+// ---------------------------------------------------------------------------
+// Interface
+// ---------------------------------------------------------------------------
+
+export interface MemoryStore {
+  /** List all memory files with their frontmatter headers. */
+  list(): Promise<MemoryHeader[]>
+
+  /** Read full content of a memory file. */
+  read(filename: string): Promise<string>
+
+  /** Write (create or overwrite) a memory file. */
+  write(filename: string, content: string): Promise<void>
+
+  /** Append a line to a memory file (KAIROS daily log mode). */
+  append(filename: string, entry: string): Promise<void>
+
+  /** Delete a memory file. */
+  delete(filename: string): Promise<void>
+
+  /** Read the MEMORY.md index. Returns null if not exists. */
+  getIndex(): Promise<string | null>
+
+  /** Write the MEMORY.md index. */
+  updateIndex(content: string): Promise<void>
+
+  /** Check if a file exists. */
+  exists(filename: string): Promise<boolean>
+
+  /** Get the memory directory path. */
+  getDir(): string
+}
+
+// ---------------------------------------------------------------------------
+// Frontmatter parser (reads name/description/type/scope/confidence/schema_version)
+// ---------------------------------------------------------------------------
+
+export function parseFrontmatter(
+  content: string,
+): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number } {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!match) return {}
+  const yaml = match[1]
+  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number } = {}
+  for (const line of yaml.split(/\r?\n/)) {
+    const kv = line.match(/^(\w+):\s*(.*)$/)
+    if (!kv) continue
+    const [, key, value] = kv
+    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence") {
+      result[key] = value.trim()
+    } else if (key === "schema_version") {
+      result.schema_version = parseInt(value.trim(), 10)
+    }
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// FileSystemStore implementation
+// ---------------------------------------------------------------------------
+
+export const ENTRYPOINT_NAME = "MEMORY.md"
+
+export class FileSystemStore implements MemoryStore {
+  private readonly dir: string
+  private readonly maxFiles: number
+  private readonly frontmatterMaxLines: number
+
+  constructor(dir: string, maxFiles = 200, frontmatterMaxLines = 30) {
+    this.dir = dir
+    this.maxFiles = maxFiles
+    this.frontmatterMaxLines = frontmatterMaxLines
+  }
+
+  getDir(): string {
+    return this.dir
+  }
+
+  async list(): Promise<MemoryHeader[]> {
+    try {
+      const entries = await readdir(this.dir, { recursive: true })
+      const mdFiles = entries.filter(
+        (f) => f.endsWith(".md") && basename(f) !== ENTRYPOINT_NAME,
+      )
+
+      const results = await Promise.allSettled(
+        mdFiles.map(async (relativePath): Promise<MemoryHeader> => {
+          const filePath = join(this.dir, relativePath)
+          const stats = await stat(filePath)
+          // Read only first N lines for frontmatter
+          const content = await readFile(filePath, { encoding: "utf-8" })
+          const lines = content.split("\n", this.frontmatterMaxLines)
+          const fm = parseFrontmatter(lines.join("\n"))
+          return {
+            filename: relativePath,
+            filePath,
+            mtimeMs: stats.mtimeMs,
+            description: fm.description || null,
+            type: fm.type as MemoryHeader["type"],
+            scope: fm.scope as MemoryHeader["scope"],
+            confidence: parseConfidence(fm.confidence),
+            schemaVersion: fm.schema_version,
+          }
+        }),
+      )
+
+      return results
+        .filter(
+          (r): r is PromiseFulfilledResult<MemoryHeader> =>
+            r.status === "fulfilled",
+        )
+        .map((r) => r.value)
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, this.maxFiles)
+    } catch {
+      return []
+    }
+  }
+
+  async read(filename: string): Promise<string> {
+    const filePath = this.resolvePath(filename)
+    return readFile(filePath, { encoding: "utf-8" })
+  }
+
+  async write(filename: string, content: string): Promise<void> {
+    const filePath = this.resolvePath(filename)
+    await mkdir(join(filePath, ".."), { recursive: true })
+    await writeFile(filePath, content, { encoding: "utf-8" })
+  }
+
+  async append(filename: string, entry: string): Promise<void> {
+    const filePath = this.resolvePath(filename)
+    // Create parent dirs if needed
+    await mkdir(join(filePath, ".."), { recursive: true })
+    await appendFile(filePath, entry, { encoding: "utf-8" })
+  }
+
+  async delete(filename: string): Promise<void> {
+    const filePath = this.resolvePath(filename)
+    await unlink(filePath)
+  }
+
+  async getIndex(): Promise<string | null> {
+    try {
+      return await readFile(join(this.dir, ENTRYPOINT_NAME), {
+        encoding: "utf-8",
+      })
+    } catch {
+      return null
+    }
+  }
+
+  async updateIndex(content: string): Promise<void> {
+    await writeFile(join(this.dir, ENTRYPOINT_NAME), content, {
+      encoding: "utf-8",
+    })
+  }
+
+  async exists(filename: string): Promise<boolean> {
+    try {
+      await stat(this.resolvePath(filename))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Resolve a filename to an absolute path within the memory dir. */
+  private resolvePath(filename: string): string {
+    // Prevent path traversal — reject absolute paths and .. segments
+    if (filename.includes("..") || isAbsolute(filename)) {
+      throw new Error(`Path traversal rejected: ${filename}`)
+    }
+    return join(this.dir, filename)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export async function createStore(
+  dir: string,
+  options?: { maxFiles?: number; frontmatterMaxLines?: number },
+): Promise<MemoryStore> {
+  // Ensure directory exists
+  await mkdir(dir, { recursive: true })
+  return new FileSystemStore(
+    dir,
+    options?.maxFiles ?? 200,
+    options?.frontmatterMaxLines ?? 30,
+  )
+}

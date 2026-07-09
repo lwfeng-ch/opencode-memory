@@ -1,0 +1,10 @@
+{
+  "name": "opencode-memory",
+  "version": "0.1.0",
+  "description": "Pipeline-centered, model-agnostic long-term memory system for OpenCode — KAIROS mode, two-stage recall, dream consolidation.",
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.14.48"
+  }
+}
