@@ -28,7 +28,7 @@
  */
 
 import { join } from "path"
-import type { MemoryPluginConfig } from "./config.js"
+import type { MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js"
 import type { MemoryStore } from "./store.js"
 import { parseFrontmatter } from "./store.js"
 import { scanMemoryFiles, formatManifest } from "./scan.js"
@@ -168,7 +168,7 @@ function parseLogDate(filename: string): Date | null {
  */
 export interface DreamAgentClient {
   session: {
-    create: (opts: Record<string, unknown>) => Promise<{ id: string }>
+    create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>
     chat: (id: string, opts: { message: string }) => Promise<unknown>
   }
 }
@@ -222,9 +222,9 @@ async function orientPhase(
     `}`,
   ].join("\n")
 
-  const session = await client.session.create({
-    agent: config.dream.category,
-  })
+  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  if (config.models.dream) createOpts.model = config.models.dream
+  const session = await client.session.create(createOpts)
   const response = await client.session.chat(session.id, { message: prompt })
   return parseJsonResponse(response)
 }
@@ -305,9 +305,9 @@ async function gatherPhase(
     `}`,
   ].join("\n")
 
-  const session = await client.session.create({
-    agent: config.dream.category,
-  })
+  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  if (config.models.dream) createOpts.model = config.models.dream
+  const session = await client.session.create(createOpts)
   const response = await client.session.chat(session.id, { message: prompt })
   return parseJsonResponse(response)
 }
@@ -371,9 +371,9 @@ async function consolidatePhase(
     `}`,
   ].join("\n")
 
-  const session = await client.session.create({
-    agent: config.dream.category,
-  })
+  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  if (config.models.dream) createOpts.model = config.models.dream
+  const session = await client.session.create(createOpts)
   const response = await client.session.chat(session.id, { message: prompt })
 
   const result = parseJsonResponse(response) as {
@@ -534,24 +534,53 @@ export async function runDreamConsolidation(
 
   try {
     const phases: string[] = []
+    const errors: string[] = []
 
     // Phase 1 — Orient
-    const orientResult = await orientPhase(store, config, client)
-    phases.push("orient")
+    let orientResult: unknown = {}
+    try {
+      orientResult = await orientPhase(store, config, client)
+      phases.push("orient")
+    } catch (err) {
+      errors.push(`orient: ${err instanceof Error ? err.message : String(err)}`)
+    }
 
     // Phase 2 — Gather (depends on orient to identify drift candidates)
-    const gatherResult = await gatherPhase(store, config, client, orientResult)
-    phases.push("gather")
+    let gatherResult: unknown = {}
+    if (!errors.some((e) => e.startsWith("orient:"))) {
+      try {
+        gatherResult = await gatherPhase(store, config, client, orientResult)
+        phases.push("gather")
+      } catch (err) {
+        errors.push(`gather: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
 
     // Phase 3 — Consolidate (depends on both orient and gather)
-    await consolidatePhase(store, config, client, orientResult, gatherResult)
-    phases.push("consolidate")
+    const canConsolidate =
+      phases.includes("orient") && phases.includes("gather")
+    if (canConsolidate) {
+      try {
+        await consolidatePhase(store, config, client, orientResult, gatherResult)
+        phases.push("consolidate")
+      } catch (err) {
+        errors.push(`consolidate: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
 
     // Phase 4 — Prune (reads actual files on disk, no agent needed)
-    await prunePhase(store, config)
-    phases.push("prune")
+    try {
+      await prunePhase(store, config)
+      phases.push("prune")
+    } catch (err) {
+      errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`)
+    }
 
-    return { success: true, phases }
+    return {
+      success: errors.length === 0,
+      phases,
+      error: errors.length > 0 ? errors.join("; ") : undefined,
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     return { success: false, error: message }

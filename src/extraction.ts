@@ -16,7 +16,7 @@
  * that the recall pipeline can surface in future sessions.
  */
 
-import type { MemoryPluginConfig } from "./config.js"
+import type { MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js"
 import type { MemoryStore } from "./store.js"
 
 // ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ export async function extractSessionMemory(
   config: MemoryPluginConfig,
   client: {
     session: {
-      create: (opts: Record<string, unknown>) => Promise<{ id: string }>
+      create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>
       chat: (id: string, opts: { message: string }) => Promise<unknown>
       messages: (id: string) => Promise<SessionMessage[]>
     }
@@ -309,9 +309,9 @@ export async function extractSessionMemory(
     // ────────────────────────────────────────────────────────────────
     let extractSessionId: string
     try {
-      const extractSession = await client.session.create({
-        agent: config.extraction.category,
-      })
+      const createOpts: AgentSessionCreateOptions = { agent: config.extraction.category }
+      if (config.models.extraction) createOpts.model = config.models.extraction
+      const extractSession = await client.session.create(createOpts)
       extractSessionId = extractSession.id
     } catch {
       return {

@@ -17,6 +17,22 @@ import { join, dirname } from "path"
 import { fileURLToPath } from "url"
 
 // ---------------------------------------------------------------------------
+// Shared agent client types
+// ---------------------------------------------------------------------------
+
+/** Options passed to the agent framework when creating a sub-session.
+ *
+ * - `agent` / `category` / `subagentType`: which agent category to use
+ *   (e.g. "explore", "quick", "deep").
+ * - `model`: optional model override. If omitted or null, the framework falls
+ *   back to the default for the chosen agent category.
+ */
+export interface AgentSessionCreateOptions {
+  agent: string
+  model?: string
+}
+
+// ---------------------------------------------------------------------------
 // Memory type taxonomy (ported from Claude Code, kept compatible)
 // ---------------------------------------------------------------------------
 

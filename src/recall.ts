@@ -12,7 +12,7 @@
  * rate-limit), the system falls back to Stage 1 results with zero data loss.
  */
 
-import type { MemoryHeader, MemoryPluginConfig } from "./config.js";
+import type { MemoryHeader, MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js";
 import type { MemoryStore } from "./store.js";
 import { scanMemoryFiles, formatManifest } from "./scan.js";
 import { memoryAgeDays } from "./staleness.js";
@@ -271,7 +271,7 @@ export async function recallMemories(
   config: MemoryPluginConfig,
   client: {
     session: {
-      create: (opts: { agent: string }) => Promise<{ id: string }>;
+      create: (opts: { agent: string; model?: string }) => Promise<{ id: string }>;
       chat: (id: string, opts: { prompt: string; maxTokens: number }) => Promise<unknown>;
     };
     sessionList?: () => Promise<unknown[]>;
@@ -328,9 +328,9 @@ export async function recallMemories(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const session = await client.session.create({
-      agent: config.recall.subagentType,
-    });
+    const createOpts: AgentSessionCreateOptions = { agent: config.recall.subagentType };
+    if (config.models.recall) createOpts.model = config.models.recall;
+    const session = await client.session.create(createOpts);
     sessionId = session.id;
   } catch {
     // Graceful degradation: LLM unavailable → use rule-filtered results
@@ -473,7 +473,7 @@ export async function recallMemoriesMultiScope(
   config: MemoryPluginConfig,
   client: {
     session: {
-      create: (opts: { agent: string }) => Promise<{ id: string }>;
+      create: (opts: { agent: string; model?: string }) => Promise<{ id: string }>;
       chat: (id: string, opts: { prompt: string; maxTokens: number }) => Promise<unknown>;
     };
     sessionList?: () => Promise<unknown[]>;
@@ -551,9 +551,9 @@ export async function recallMemoriesMultiScope(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const session = await client.session.create({
-      agent: config.recall.subagentType,
-    });
+    const createOpts: AgentSessionCreateOptions = { agent: config.recall.subagentType };
+    if (config.models.recall) createOpts.model = config.models.recall;
+    const session = await client.session.create(createOpts);
     sessionId = session.id;
   } catch {
     // Graceful degradation: LLM unavailable → use rule-filtered results
