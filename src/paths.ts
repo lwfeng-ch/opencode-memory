@@ -24,6 +24,12 @@ export function findGitRoot(dir: string): string | null {
 
 /** Get the memory directory path: ~/.config/opencode/memory/projects/<sanitized-git-root>/ */
 export function getMemoryDir(directory: string, worktree: string): string {
+  if (typeof directory !== "string" || directory.length === 0) {
+    throw new Error("getMemoryDir requires a non-empty directory path");
+  }
+  if (typeof worktree !== "string" || worktree.length === 0) {
+    throw new Error("getMemoryDir requires a non-empty worktree path");
+  }
   const gitRoot = findGitRoot(worktree);
   const base = gitRoot ?? directory;
   const sanitized = sanitizePath(base);

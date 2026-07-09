@@ -35,3 +35,6 @@ coverage/
 # Logs
 *.log
 logs/
+
+# Temporary / malformed directories created during development
+undefined/
