@@ -38,3 +38,9 @@ logs/
 
 # Temporary / malformed directories created during development
 undefined/
+
+# Local planning / agent artifacts (not source)
+.omo/
+
+# Local agent instructions (session-specific, not project source)
+AGENTS.md
