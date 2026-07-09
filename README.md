@@ -178,6 +178,60 @@ bun run test/scope-integration.ts
 4. **Cooperative, not competitive** — Main agent writes memories proactively; extraction/dream are safety nets
 5. **Defense in depth** — Path traversal protection at both tool layer and store layer
 
+## Memory System Conceptual Q&A
+
+> A user-perspective summary of how the memory system works, complementing the technical documentation above.
+
+### What the Memory System Is
+
+A file-based persistence mechanism across sessions, so the agent carries forward into each new conversation:
+
+- Who you are (identity, role, preferences)
+- How you like to collaborate (corrected mistakes, validated approaches)
+- Project context (motivation, progress, who is doing what)
+- Where external resources live (Linear, Slack, etc. pointers)
+
+Two scopes:
+
+- **User-level** (cross-project, shared): identity and preferences
+- **Project-level** (per-project): project context; overrides user-level on conflict
+
+### Design Tensions
+
+The system balances four tensions:
+
+1. **Persistence vs Freshness** — A memory is a point-in-time snapshot ("true when written"); verify before recommending (does the file still exist? the function?), update or delete when stale
+2. **Completeness vs Relevance** — `MEMORY.md` holds only index pointers (always loaded, <200 lines); full content is read on demand, preventing context bloat
+3. **Automatic vs Controlled** — Semi-automatic: agent-driven primary + fallback auto-extraction; rejects forced auto-recording (avoids noise and loss of control)
+4. **Derivable vs Non-derivable** — Only store what can't be derived from current state; code patterns, git history, AGENTS.md content, and debug fixes are never stored
+
+Additional principles:
+
+- **Type classification matches lifecycle**: `user` (stable), `feedback` (applies every turn; record both corrections AND confirmations), `project` (volatile), `reference` (navigation pointers)
+- **Memory ≠ Plan ≠ Tasks**: Plan aligns approach within a conversation, Tasks track progress within a conversation, Memory persists across conversations
+- **Instruction priority**: User > Skills > System prompt; memory is a tool, not an authority
+
+### When It Writes
+
+Two trigger modes:
+
+1. **Explicit** — You say "remember…", "forget…", "always do this"; the agent writes or deletes immediately
+2. **Inferred** — The agent proactively detects signals:
+   - You reveal role/preferences/knowledge → `user`
+   - You correct an approach ("no, not that") or confirm a non-obvious one ("yes, exactly") → `feedback`
+   - You mention project who/what/why/when → `project` (relative dates converted to absolute)
+   - You reference external systems → `reference`
+
+Key: `feedback` records confirmations too — recording only corrections makes the agent overly cautious and drifts away from validated methods.
+
+### Source Transparency
+
+Agent statements about the memory system fall into three reliability layers:
+
+- **Mechanism layer** (how it works, rules): from system prompt, reliable
+- **Index layer** (what's stored): from `MEMORY.md` summary; full file content needs separate read to verify
+- **Inference layer** (why it's designed this way): agent's rationalization based on mechanism; may have bias
+
 ## License
 
 MIT
