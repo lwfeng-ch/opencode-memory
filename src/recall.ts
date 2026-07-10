@@ -163,6 +163,13 @@ function parseSelectionResponse(
 
   if (typeof response === "string") {
     text = response;
+  } else if (Array.isArray((response as Record<string, unknown>)?.parts)) {
+    // Handle SDK message shape: { info: AssistantMessage, parts: [{ type: "text", text: "..." }] }
+    const parts = (response as Record<string, unknown>).parts as Array<Record<string, unknown>>;
+    text = parts
+      .filter((p) => p && p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text as string)
+      .join("\n");
   } else if (typeof (response as any)?.content === "string") {
     text = (response as any).content;
   } else if (typeof (response as any)?.response === "string") {
@@ -271,10 +278,9 @@ export async function recallMemories(
   config: MemoryPluginConfig,
   client: {
     session: {
-      create: (opts: { agent: string; model?: string }) => Promise<{ id: string }>;
-      chat: (id: string, opts: { prompt: string; maxTokens: number }) => Promise<unknown>;
+      create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>;
+      chat: (id: string, opts: { message: string }) => Promise<unknown>;
     };
-    sessionList?: () => Promise<unknown[]>;
   },
 ): Promise<RecallResult> {
   // -----------------------------------------------------------------------
@@ -328,7 +334,7 @@ export async function recallMemories(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const createOpts: AgentSessionCreateOptions = { agent: config.recall.subagentType };
+    const createOpts: AgentSessionCreateOptions = {};
     if (config.models.recall) createOpts.model = config.models.recall;
     const session = await client.session.create(createOpts);
     sessionId = session.id;
@@ -352,10 +358,9 @@ export async function recallMemories(
   );
 
   try {
-    const response = await client.session.chat(sessionId, {
-      prompt,
-      maxTokens: config.recall.maxTokens,
-    });
+      const response = await client.session.chat(sessionId, {
+        message: prompt,
+      });
 
     const selectedFilenames = parseSelectionResponse(response);
 
@@ -473,10 +478,9 @@ export async function recallMemoriesMultiScope(
   config: MemoryPluginConfig,
   client: {
     session: {
-      create: (opts: { agent: string; model?: string }) => Promise<{ id: string }>;
-      chat: (id: string, opts: { prompt: string; maxTokens: number }) => Promise<unknown>;
+      create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>;
+      chat: (id: string, opts: { message: string }) => Promise<unknown>;
     };
-    sessionList?: () => Promise<unknown[]>;
   },
 ): Promise<ScopedRecallResult> {
   // -----------------------------------------------------------------------
@@ -551,7 +555,7 @@ export async function recallMemoriesMultiScope(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const createOpts: AgentSessionCreateOptions = { agent: config.recall.subagentType };
+    const createOpts: AgentSessionCreateOptions = {};
     if (config.models.recall) createOpts.model = config.models.recall;
     const session = await client.session.create(createOpts);
     sessionId = session.id;
@@ -571,10 +575,9 @@ export async function recallMemoriesMultiScope(
   const prompt = buildSelectionPrompt(query, manifest, config.recall.maxResults);
 
   try {
-    const response = await client.session.chat(sessionId, {
-      prompt,
-      maxTokens: config.recall.maxTokens,
-    });
+      const response = await client.session.chat(sessionId, {
+        message: prompt,
+      });
 
     const selectedFilenames = parseSelectionResponse(response);
 

@@ -4,8 +4,12 @@
   "description": "Pipeline-centered, model-agnostic long-term memory system for OpenCode — KAIROS mode, two-stage recall, dream consolidation.",
   "type": "module",
   "main": "src/index.ts",
+  "engines": {
+    "node": ">=18.17"
+  },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.14.48"
+    "@opencode-ai/plugin": "^1.14.48",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

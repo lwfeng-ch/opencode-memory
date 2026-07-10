@@ -9,8 +9,9 @@
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdir, rm, writeFile, readFile } from "fs/promises";
-import { join } from "path";
+import { join, dirname } from "path";
 import { tmpdir } from "os";
+import { getFactSessionPath } from "../src/paths.js";
 
 // ---------------------------------------------------------------------------
 // Imports under test
@@ -83,7 +84,7 @@ async function writeLogFile(
   await store.write(filename, content);
 }
 
-/** Create a mock dream agent client with configurable responses. */
+/** Create a mock dream adapter with configurable responses. */
 function createDreamMockClient(
   overrides?: {
     orientResponse?: unknown;
@@ -95,29 +96,29 @@ function createDreamMockClient(
   let callCount = 0;
   return {
     session: {
-      create: async (_opts: Record<string, unknown>) => {
+      create: async (_opts: any) => {
         callCount++;
         if (overrides?.throwOnSecondCreate && callCount >= 2) {
           throw new Error("Simulated session create failure");
         }
         return { id: "dream-session-" + Math.random().toString(36).slice(2) };
       },
-      chat: async (_id: string, opts: { message: string }) => {
-        if (opts.message.includes("analyzing")) {
+      prompt: async (_id: string, message: string) => {
+        if (message.includes("analyzing")) {
           return {
             content:
               overrides?.orientResponse ??
               '```json\n{"topics":["testing"],"gaps":["deployment"],"staleFiles":[],"mergeCandidates":[],"notes":"ok"}\n```',
           };
         }
-        if (opts.message.includes("gathering")) {
+        if (message.includes("gathering")) {
           return {
             content:
               overrides?.gatherResponse ??
               '```json\n{"logsSummary":"user worked on tests","driftedMemories":[],"newInfo":["prefers integration tests"]}\n```',
           };
         }
-        if (opts.message.includes("consolidating")) {
+        if (message.includes("consolidating")) {
           return {
             content:
               overrides?.consolidateResponse ??
@@ -126,11 +127,16 @@ function createDreamMockClient(
         }
         return { content: "{}" };
       },
+      messages: async (_id: string) => [],
     },
+    workspace: { current: async () => "/test" },
+    git: { snapshot: async () => ({ branch: "", head: "", changedFiles: [] }) },
+    capabilities: { sessionCreate: true, messageRead: true, eventStream: true, backgroundTask: true, toolHook: true },
+    healthCheck: async () => ({ sessionCreate: true, sessionMessages: true, sessionPrompt: "untested" as const, errors: [] }),
   };
 }
 
-/** Create a mock extraction client. */
+/** Create a mock extraction adapter. */
 function createExtractionMockClient(overrides?: {
   messages?: any[];
   throwOnCreate?: boolean;
@@ -144,7 +150,7 @@ function createExtractionMockClient(overrides?: {
         }
         return { id: "extract-session" };
       },
-      chat: async (_id: string, _opts: any) => {
+      prompt: async (_id: string, _message: string) => {
         return (
           overrides?.chatResponse ?? {
             content:
@@ -161,7 +167,31 @@ function createExtractionMockClient(overrides?: {
         );
       },
     },
+    workspace: { current: async () => "/test" },
+    git: { snapshot: async () => ({ branch: "", head: "", changedFiles: [] }) },
+    capabilities: { sessionCreate: true, messageRead: true, eventStream: true, backgroundTask: true, toolHook: true },
+    healthCheck: async () => ({ sessionCreate: true, sessionMessages: true, sessionPrompt: "untested" as const, errors: [] }),
   };
+}
+
+/** Write a minimal fact record for testing extraction. */
+async function writeFactRecord(memoryDir: string, sessionId: string, messages: number = 2): Promise<void> {
+  const factPath = getFactSessionPath(memoryDir, sessionId);
+  await mkdir(dirname(factPath), { recursive: true });
+  const record = {
+    "$id": "memory://fact-session/v1",
+    "session_id": sessionId,
+    "created_at": new Date().toISOString(),
+    "ended_at": new Date().toISOString(),
+    "project": "test",
+    "project_dir": memoryDir,
+    "runtime": { "opencode_version": "test", "plugin_version": "test", "model": "test" },
+    "git": { "branch": "", "head": "", "changed_files": [] },
+    "stats": { "messages": messages, "tool_calls": 0, "duration_minutes": 10 },
+    "events": [],
+    "integrity": { "hash": "" }
+  };
+  await writeFile(factPath, JSON.stringify(record, null, 2));
 }
 
 // ---------------------------------------------------------------------------
@@ -319,12 +349,13 @@ test("B2: extractSessionMemory succeeds with mock client", async () => {
   const config = resolveConfig();
   const mockClient = createExtractionMockClient();
 
-  const result = await extractSessionMemory("test-session", store, config, mockClient);
+  await writeFactRecord(dir, "test-session", 2);
+  const result = await extractSessionMemory("test-session", dir, store, config, mockClient as any, join(dir, "state.json"));
 
   expect(result.success).toBe(true);
 
-  // Session memory file should exist
-  const sessionFile = "session-memory/test-session.md";
+  // Session memory file should exist at the new semantic path
+  const sessionFile = "semantic/sessions/session_test-session.md";
   const exists = await store.exists(sessionFile);
   expect(exists).toBe(true);
 
@@ -341,7 +372,8 @@ test("B3: extractSessionMemory with empty conversation returns success (no-op)",
   const config = resolveConfig();
   const mockClient = createExtractionMockClient({ messages: [] });
 
-  const result = await extractSessionMemory("empty-session", store, config, mockClient);
+  await writeFactRecord(dir, "empty-session", 0);
+  const result = await extractSessionMemory("empty-session", dir, store, config, mockClient as any, join(dir, "state.json"));
 
   expect(result.success).toBe(true);
 });
@@ -354,7 +386,8 @@ test("B4: extractSessionMemory with failing agent returns error", async () => {
   const config = resolveConfig();
   const mockClient = createExtractionMockClient({ throwOnCreate: true });
 
-  const result = await extractSessionMemory("fail-session", store, config, mockClient);
+  await writeFactRecord(dir, "fail-session", 2);
+  const result = await extractSessionMemory("fail-session", dir, store, config, mockClient as any, join(dir, "state.json"));
 
   expect(result.success).toBe(false);
   expect(result.error).toContain("Failed to create");
@@ -371,9 +404,9 @@ test("C1: MemoryPlugin loads and returns hooks", async () => {
   const mockInput = {
     client: {
       session: {
-        create: async () => ({ id: "x" }),
-        chat: async () => ({}),
-        messages: async () => [],
+        create: async () => ({ data: { id: "x" } }),
+        prompt: async () => ({ data: {} }),
+        messages: async () => ({ data: [] }),
       },
       provider: {
         list: async () => ({ data: { connected: [] } }),
@@ -383,10 +416,11 @@ test("C1: MemoryPlugin loads and returns hooks", async () => {
     directory: dir,
     worktree: dir,
     serverUrl: new URL("http://localhost:3000"),
+    experimental_workspace: { register: () => {} },
     $: {} as any,
   };
 
-  const hooks = await MemoryPlugin(mockInput, {});
+  const hooks = await MemoryPlugin(mockInput as any, {});
 
   expect(hooks).toBeDefined();
   expect(typeof hooks).toBe("object");
@@ -406,9 +440,9 @@ test("C2: tool registration has all 6 memory tools", async () => {
   const mockInput = {
     client: {
       session: {
-        create: async () => ({ id: "x" }),
-        chat: async () => ({}),
-        messages: async () => [],
+        create: async () => ({ data: { id: "x" } }),
+        prompt: async () => ({ data: {} }),
+        messages: async () => ({ data: [] }),
       },
       provider: {
         list: async () => ({ data: { connected: [] } }),
@@ -418,10 +452,11 @@ test("C2: tool registration has all 6 memory tools", async () => {
     directory: dir,
     worktree: dir,
     serverUrl: new URL("http://localhost:3000"),
+    experimental_workspace: { register: () => {} },
     $: {} as any,
   };
 
-  const hooks = await MemoryPlugin(mockInput, {});
+  const hooks = await MemoryPlugin(mockInput as any, {});
   const tools = hooks.tool as Record<string, any>;
 
   expect(tools).toBeDefined();
@@ -441,9 +476,9 @@ test("C3: system prompt injection contains Auto Memory section", async () => {
   const mockInput = {
     client: {
       session: {
-        create: async () => ({ id: "x" }),
-        chat: async () => ({}),
-        messages: async () => [],
+        create: async () => ({ data: { id: "x" } }),
+        prompt: async () => ({ data: {} }),
+        messages: async () => ({ data: [] }),
       },
       provider: {
         list: async () => ({ data: { connected: [] } }),
@@ -453,10 +488,11 @@ test("C3: system prompt injection contains Auto Memory section", async () => {
     directory: dir,
     worktree: dir,
     serverUrl: new URL("http://localhost:3000"),
+    experimental_workspace: { register: () => {} },
     $: {} as any,
   };
 
-  const hooks = await MemoryPlugin(mockInput, {});
+  const hooks = await MemoryPlugin(mockInput as any, {});
   const transform = hooks["experimental.chat.system.transform"] as (
     input: any,
     output: { system: string[] },

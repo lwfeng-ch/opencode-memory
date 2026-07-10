@@ -2,37 +2,37 @@
  * opencode-memory — Dream consolidation pipeline
  *
  * Four-phase memory consolidation: **Orient → Gather → Consolidate → Prune**.
- * Runs periodically when the three scheduling gates pass (cheapest-first to
- * short-circuit early and avoid expensive checks when consolidation is not
- * needed).
+ * Runs periodically when the scheduling gates pass (mode-specific).
  *
- * Scheduling gates (in `shouldRunDream()`):
- *   1. **Time gate** (cheapest) — minimum hours since last consolidation
- *   2. **Sessions gate** (medium) — minimum files modified since last
- *      consolidation (file mtime as a proxy for session activity)
- *   3. **Lock gate** (most expensive) — check if another process is already
- *      consolidating
+ * Gate modes (configured via `config.dream.mode`):
+ *   - `development`: triggers every idle, 0 sessions required
+ *   - `normal`: 24h + 5 sessions + memory pressure override
+ *   - `production`: 7 days + memory pressure (count > 500 OR index > 25KB)
  *
- * The consolidation pipeline (`runDreamConsolidation()`):
- *   1. **Orient** — scan existing memories, read the MEMORY.md index, build
- *      a picture of current state and identify gaps.
- *   2. **Gather** — mine daily logs for recent activity and check for
- *      drifted (outdated) memories.
- *   3. **Consolidate** — write, update, and merge memory files based on
- *      insights from orient and gather.
- *   4. **Prune** — re-scan files, regenerate the index, enforce entrypoint
- *      caps (maxLines / maxBytes), and sort entries.
+ * Staging area: Dream writes proposed changes to `semantic/staging/`
+ * instead of directly modifying long-term memories. The promotion layer
+ * (`promotion.ts`) validates and promotes staged changes after all phases
+ * complete. Proposed memories include provenance frontmatter
+ * (`confidence.level: derived`, `source.kind: dream`, `schema_version: 2`).
+ *
+ * State: after each run, `state.json` is updated with `dream.last_run_at`,
+ * `dream.total_runs`, and `dream.last_error` (on failure).
  *
  * Mutual exclusion is enforced via a `.consolidate-lock` file in the memory
  * directory. The lock is always released in a `finally` block, even on error.
+ * All failures are caught and logged — Dream never throws.
  */
 
 import { join } from "path"
 import type { MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js"
 import type { MemoryStore } from "./store.js"
+import type { RuntimeAdapter } from "./adapter.js"
+import { info as logInfo, error as logError } from "./log.js"
+import { loadState, updateState } from "./state.js"
 import { parseFrontmatter } from "./store.js"
 import { scanMemoryFiles, formatManifest } from "./scan.js"
 import { acquireLock, releaseLock, getLockMtime, isLockHeld } from "./lock.js"
+import { promoteStaging } from "./promotion.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -50,43 +50,87 @@ function getLockPath(store: MemoryStore): string {
 }
 
 // ---------------------------------------------------------------------------
-// Three-gate scheduling (cheapest-first)
+// Gate-mode scheduling (cheapest-first)
 // ---------------------------------------------------------------------------
 
 /**
  * Check whether dream consolidation should run.
  *
- * Three gates, evaluated cheapest-first so we short-circuit as early as
- * possible:
+ * Gate modes (cheapest-first evaluation within each mode):
  *
- * | Gate   | Cost      | What it checks                          |
- * |--------|-----------|-----------------------------------------|
- * | 1 Time | Cheapest  | Hours since last lock mtime             |
- * | 2 Files| Medium    | Files modified since last lock mtime    |
- * | 3 Lock | Expensive | Whether another process holds the lock  |
+ * | Mode         | Time gate    | Session gate | Memory pressure                     |
+ * |--------------|-------------|-------------|-------------------------------------|
+ * | development  | every idle  | 0           | none                                |
+ * | normal       | 24h         | 5 sessions  | count > threshold                   |
+ * | production   | 7 days      | —           | count > 500 OR index_size > 25KB   |
+ *
+ * Memory pressure can override the time gate — if the memory count exceeds
+ * the threshold or the index is too large, Dream triggers regardless of
+ * time/session gates.
  *
  * @param store  - Memory store for file listing.
  * @param config - Plugin configuration with dream settings.
- * @returns `true` if all three gates pass and consolidation should proceed.
+ * @returns `true` if all applicable gates pass and consolidation should proceed.
  */
 export async function shouldRunDream(
   store: MemoryStore,
   config: MemoryPluginConfig,
+  statePath?: string,
 ): Promise<boolean> {
+  const mode = config.dream.mode
   const lockPath = getLockPath(store)
+
+  // Development mode: skip time and session gates — only check lock
+  if (mode === "development") {
+    const held = await isLockHeld(lockPath, config.dream.lockStaleTimeoutMs)
+    return !held
+  }
+
+  // --- Gate 0: Message threshold (if configured, overrides time+session gates) ---
+  if (config.dream.minMessagesSinceLast > 0 && statePath) {
+    const state = await loadState(statePath)
+    if (state.dream.messages_since_last >= config.dream.minMessagesSinceLast) {
+      const held = await isLockHeld(lockPath, config.dream.lockStaleTimeoutMs)
+      return !held
+    }
+    // Message threshold not met — don't fall through to time gate (user explicitly
+    // configured message-based triggering). Return false.
+    return false
+  }
 
   // --- Gate 1: Time (cheapest — stat only) ---
   const lockMtime = await getLockMtime(lockPath)
   const hoursSinceLast = (Date.now() - lockMtime) / MS_PER_HOUR
-  if (hoursSinceLast < config.dream.minHoursSinceLast) {
+  const requiredHours = mode === "production" ? 168 : config.dream.minHoursSinceLast
+  const timeGatePassed = hoursSinceLast >= requiredHours
+
+  // --- Gate 2: Memory pressure OR sessions (medium — list + filter) ---
+  const memories = await store.list()
+  const memoryCount = memories.length
+  const memoryPressureTriggered = memoryCount > config.dream.memoryPressure
+
+  // Index size check
+  const index = await store.getIndex()
+  const indexSize = index ? Buffer.byteLength(index, "utf-8") : 0
+  const indexSizeOverLimit = indexSize > config.entrypoint.maxBytes
+
+  // Memory pressure overrides time and session gates
+  if (memoryPressureTriggered || indexSizeOverLimit) {
+    const held = await isLockHeld(lockPath, config.dream.lockStaleTimeoutMs)
+    return !held
+  }
+
+  // If time gate didn't pass and no memory pressure, don't run
+  if (!timeGatePassed) {
     return false
   }
 
-  // --- Gate 2: Sessions (medium — list + filter) ---
-  const memories = await store.list()
-  const recentCount = memories.filter((m) => m.mtimeMs > lockMtime).length
-  if (recentCount < config.dream.minSessionsSinceLast) {
-    return false
+  // Session gate (normal mode only)
+  if (mode === "normal") {
+    const recentCount = memories.filter((m) => m.mtimeMs > lockMtime).length
+    if (recentCount < config.dream.minSessionsSinceLast) {
+      return false
+    }
   }
 
   // --- Gate 3: Lock (most expensive — read + stat + kill) ---
@@ -111,6 +155,13 @@ function extractResponseText(response: unknown): string {
     if (typeof obj.message === "string") return obj.message
     if (typeof obj.text === "string") return obj.text
     if (typeof obj.content === "string") return obj.content
+    // Handle SDK message shape: { info: AssistantMessage, parts: [{ type: "text", text: "..." }] }
+    if (Array.isArray(obj.parts)) {
+      const textParts = (obj.parts as Array<Record<string, unknown>>)
+        .filter((p) => p && typeof p === "object" && p.type === "text" && typeof p.text === "string")
+        .map((p) => p.text as string)
+      if (textParts.length > 0) return textParts.join("\n")
+    }
   }
   return String(response)
 }
@@ -157,20 +208,60 @@ function parseLogDate(filename: string): Date | null {
 }
 
 // ---------------------------------------------------------------------------
-// Agent client shape
+// Agent client shape (kept for backward compatibility — use RuntimeAdapter)
 // ---------------------------------------------------------------------------
 
 /**
  * Minimal session-based agent client.
  *
- * `session.create` starts a new agent session (with an optional agent/category
- * hint), and `session.chat` sends a message to an existing session.
+ * @deprecated Use `RuntimeAdapter` from `./adapter.js` instead.
+ * Kept for backward compatibility with tests that reference this type.
  */
 export interface DreamAgentClient {
   session: {
     create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>
     chat: (id: string, opts: { message: string }) => Promise<unknown>
   }
+}
+
+// ---------------------------------------------------------------------------
+// Provenance helper — add confidence/source to Dream's proposed memories
+// ---------------------------------------------------------------------------
+
+/**
+ * Add provenance frontmatter to a proposed memory.
+ *
+ * Dream-derived memories always have:
+ *   - `confidence.level: derived` (lowest priority — cannot override higher)
+ *   - `source.kind: dream`
+ *   - `source.fact_id: null` (no fact record linkage yet)
+ *   - `schema_version: 2`
+ *
+ * Existing frontmatter fields (name, description, type, scope) are preserved.
+ */
+function ensureProvenance(content: string): string {
+  const fm = parseFrontmatter(content)
+
+  // Extract body (everything after frontmatter)
+  const fmMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  const body = fmMatch ? content.slice(fmMatch[0].length) : content
+
+  const lines: string[] = ["---"]
+  if (fm.name) lines.push(`name: ${fm.name}`)
+  if (fm.description) lines.push(`description: ${fm.description}`)
+  if (fm.type) lines.push(`type: ${fm.type}`)
+  if (fm.scope) lines.push(`scope: ${fm.scope}`)
+  lines.push("confidence:")
+  lines.push("  level: derived")
+  lines.push("source:")
+  lines.push("  kind: dream")
+  lines.push("  fact_id: null")
+  lines.push("schema_version: 2")
+  lines.push("---")
+  lines.push("")
+  lines.push(body)
+
+  return lines.join("\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +278,7 @@ export interface DreamAgentClient {
 async function orientPhase(
   store: MemoryStore,
   config: MemoryPluginConfig,
-  client: DreamAgentClient,
+  adapter: RuntimeAdapter,
 ): Promise<unknown> {
   const memories = await scanMemoryFiles(store)
   const index = await store.getIndex()
@@ -222,10 +313,10 @@ async function orientPhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  const createOpts: AgentSessionCreateOptions = {}
   if (config.models.dream) createOpts.model = config.models.dream
-  const session = await client.session.create(createOpts)
-  const response = await client.session.chat(session.id, { message: prompt })
+  const session = await adapter.session.create(createOpts)
+  const response = await adapter.session.prompt(session.id, prompt)
   return parseJsonResponse(response)
 }
 
@@ -242,7 +333,7 @@ async function orientPhase(
 async function gatherPhase(
   store: MemoryStore,
   config: MemoryPluginConfig,
-  client: DreamAgentClient,
+  adapter: RuntimeAdapter,
   orientResult: unknown,
 ): Promise<unknown> {
   const memories = await store.list()
@@ -267,9 +358,9 @@ async function gatherPhase(
     }
   }
 
-  // Build drift context: for each non-log memory, show filename + description
+  // Build drift context: for each non-log, non-semantic memory
   const driftContext = memories
-    .filter((m) => !m.filename.startsWith("logs/"))
+    .filter((m) => !m.filename.startsWith("logs/") && !m.filename.startsWith("semantic/"))
     .map((m) => {
       const desc = m.description ? `: ${m.description}` : ""
       return `- ${m.filename}${desc} (last modified ${new Date(m.mtimeMs).toISOString()})`
@@ -305,12 +396,13 @@ async function gatherPhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  const createOpts: AgentSessionCreateOptions = {}
   if (config.models.dream) createOpts.model = config.models.dream
-  const session = await client.session.create(createOpts)
-  const response = await client.session.chat(session.id, { message: prompt })
+  const session = await adapter.session.create(createOpts)
+  const response = await adapter.session.prompt(session.id, prompt)
   return parseJsonResponse(response)
 }
+
 
 // ---------------------------------------------------------------------------
 // Phase 3 — Consolidate
@@ -323,13 +415,17 @@ async function gatherPhase(
  * gathered data. The agent returns a JSON payload specifying which files to
  * write (create or overwrite) and which to delete.
  *
- * Writes and deletes are applied inline by this function so subsequent phases
- * see the updated file state.
+ * Proposed changes are written to `semantic/staging/` (not directly to the
+ * memory directory) with provenance frontmatter added. The promotion layer
+ * validates and promotes them after all phases complete.
+ *
+ * Deletes are logged but not executed directly — they do not go through
+ * staging (no confidence conflict applies to removals).
  */
 async function consolidatePhase(
   store: MemoryStore,
   config: MemoryPluginConfig,
-  client: DreamAgentClient,
+  adapter: RuntimeAdapter,
   orientResult: unknown,
   gatherResult: unknown,
 ): Promise<{ writes: Array<{ filename: string; content: string }>; deletes: string[] }> {
@@ -371,10 +467,10 @@ async function consolidatePhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = { agent: config.dream.category }
+  const createOpts: AgentSessionCreateOptions = {}
   if (config.models.dream) createOpts.model = config.models.dream
-  const session = await client.session.create(createOpts)
-  const response = await client.session.chat(session.id, { message: prompt })
+  const session = await adapter.session.create(createOpts)
+  const response = await adapter.session.prompt(session.id, prompt)
 
   const result = parseJsonResponse(response) as {
     writes?: Array<{ filename: string; content: string }>
@@ -384,24 +480,20 @@ async function consolidatePhase(
   const writes = result.writes ?? []
   const deletes = result.deletes ?? []
 
-  // Apply writes
+  // Write proposed changes to staging (not directly to memory directory)
+  // Provenance frontmatter is added to each proposed memory
   for (const w of writes) {
     // Sanitize filename — prevent path traversal
     const safeFilename = w.filename.replace(/\.\./g, "").replace(/^[/\\]+/, "")
-    await store.write(safeFilename, w.content)
+    const contentWithProvenance = ensureProvenance(w.content)
+    // Write to semantic/staging/ — store.write creates parent dirs
+    await store.write(`semantic/staging/${safeFilename}`, contentWithProvenance)
   }
 
-  // Apply deletes
+  // Deletes are logged but not executed directly — they go through staging
+  // (future: delete proposals via staging; for now, just log for visibility)
   for (const f of deletes) {
-    const safeFilename = f.replace(/\.\./g, "").replace(/^[/\\]+/, "")
-    try {
-      const exists = await store.exists(safeFilename)
-      if (exists) {
-        await store.delete(safeFilename)
-      }
-    } catch {
-      // File may not exist — ignore
-    }
+    logInfo("memory:dream", `delete proposed (not executed directly): ${f}`)
   }
 
   return { writes, deletes }
@@ -418,8 +510,14 @@ async function consolidatePhase(
  * fresh MEMORY.md index sorted by type then filename, and enforces the
  * entrypoint caps (`maxLines` and `maxBytes`).
  *
+ * Files in internal directories (`semantic/`, `processing/`, `fact/`,
+ * `legacy/`) are excluded from the index — they are pipeline-internal.
+ *
  * Sorting order: user → feedback → project → reference → untagged.
  * Within the same type, files are sorted alphabetically by filename.
+ *
+ * Note: after this phase, `promoteStaging()` runs and may update the index
+ * again to reflect promoted changes.
  */
 async function prunePhase(
   store: MemoryStore,
@@ -427,6 +525,15 @@ async function prunePhase(
 ): Promise<void> {
   // Re-scan files after consolidation writes/deletes
   const memories = await scanMemoryFiles(store)
+
+  // Filter out internal directories
+  const externalMemories = memories.filter(
+    (m) =>
+      !m.filename.startsWith("semantic/") &&
+      !m.filename.startsWith("processing/") &&
+      !m.filename.startsWith("fact/") &&
+      !m.filename.startsWith("legacy/"),
+  )
 
   // Sort by type (canonical order) then filename
   const typeOrder: Record<string, number> = {
@@ -436,7 +543,7 @@ async function prunePhase(
     reference: 3,
   }
 
-  const sorted = [...memories].sort((a, b) => {
+  const sorted = [...externalMemories].sort((a, b) => {
     const ta = a.type !== undefined ? (typeOrder[a.type] ?? 99) : 99
     const tb = b.type !== undefined ? (typeOrder[b.type] ?? 99) : 99
     if (ta !== tb) return ta - tb
@@ -497,32 +604,26 @@ async function prunePhase(
  *
  * Execution flow:
  * ```
- * acquireLock ──► Orient ──► Gather ──► Consolidate ──► Prune ──► releaseLock
+ * acquireLock → Orient → Gather → Consolidate → Prune → promoteStaging → releaseLock
  * ```
  *
  * The lock is acquired at the start and **always** released in a `finally`
  * block, even when a phase throws.
  *
- * @param store  - Memory store for all file operations.
- * @param config - Plugin configuration (uses `config.dream` settings).
- * @param client - Agent client for LLM-session creation and chat.
+ * After all phases complete, `promoteStaging()` validates and promotes
+ * staged changes to long-term memory. State is updated in `state.json`
+ * regardless of success or failure.
+ *
+ * @param store   - Memory store for all file operations.
+ * @param config  - Plugin configuration (uses `config.dream` settings).
+ * @param adapter - Runtime adapter for LLM-session creation and prompting.
  * @returns Result object with `success` flag, completed `phases` array on
  *          success, or an `error` string on failure.
- *
- * @example
- * ```typescript
- * const result = await runDreamConsolidation(store, config, agentClient)
- * if (result.success) {
- *   console.log(`Completed phases: ${result.phases?.join(" → ")}`)
- * } else {
- *   console.error(`Dream failed: ${result.error}`)
- * }
- * ```
  */
 export async function runDreamConsolidation(
   store: MemoryStore,
   config: MemoryPluginConfig,
-  client: DreamAgentClient,
+  adapter: RuntimeAdapter,
 ): Promise<{ success: boolean; phases?: string[]; error?: string }> {
   const lockPath = getLockPath(store)
 
@@ -532,14 +633,14 @@ export async function runDreamConsolidation(
     return { success: false, error: "locked" }
   }
 
-  try {
-    const phases: string[] = []
-    const errors: string[] = []
+  const phases: string[] = []
+  const errors: string[] = []
 
+  try {
     // Phase 1 — Orient
     let orientResult: unknown = {}
     try {
-      orientResult = await orientPhase(store, config, client)
+      orientResult = await orientPhase(store, config, adapter)
       phases.push("orient")
     } catch (err) {
       errors.push(`orient: ${err instanceof Error ? err.message : String(err)}`)
@@ -547,9 +648,9 @@ export async function runDreamConsolidation(
 
     // Phase 2 — Gather (depends on orient to identify drift candidates)
     let gatherResult: unknown = {}
-    if (!errors.some((e) => e.startsWith("orient:"))) {
+    if (phases.includes("orient")) {
       try {
-        gatherResult = await gatherPhase(store, config, client, orientResult)
+        gatherResult = await gatherPhase(store, config, adapter, orientResult)
         phases.push("gather")
       } catch (err) {
         errors.push(`gather: ${err instanceof Error ? err.message : String(err)}`)
@@ -561,7 +662,7 @@ export async function runDreamConsolidation(
       phases.includes("orient") && phases.includes("gather")
     if (canConsolidate) {
       try {
-        await consolidatePhase(store, config, client, orientResult, gatherResult)
+        await consolidatePhase(store, config, adapter, orientResult, gatherResult)
         phases.push("consolidate")
       } catch (err) {
         errors.push(`consolidate: ${err instanceof Error ? err.message : String(err)}`)
@@ -576,6 +677,14 @@ export async function runDreamConsolidation(
       errors.push(`prune: ${err instanceof Error ? err.message : String(err)}`)
     }
 
+    // After all phases: promote staged changes to long-term memory
+    try {
+      const promoResult = await promoteStaging(store, store.getDir(), config)
+      logInfo("memory:dream", `promotion: ${promoResult.promoted} promoted, ${promoResult.rejected} rejected, ${promoResult.conflicts} conflicts`)
+    } catch (err) {
+      errors.push(`promotion: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
     return {
       success: errors.length === 0,
       phases,
@@ -583,8 +692,41 @@ export async function runDreamConsolidation(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { success: false, error: message }
+    errors.push(message)
+    return { success: false, error: errors.join("; ") }
   } finally {
-    await releaseLock(lockPath)
+    // Update state.json — always, regardless of success/failure
+    const statePath = join(store.getDir(), "state.json")
+    try {
+      await updateState(statePath, (s) => {
+        s.dream.last_run_at = new Date().toISOString()
+        s.dream.total_runs++
+        s.dream.mode = config.dream.mode
+        // Reset message counter — dream consumed the accumulated messages
+        s.dream.messages_since_last = 0
+        if (errors.length > 0) {
+          s.dream.last_error = errors.join("; ")
+        } else {
+          s.dream.last_error = null
+        }
+      })
+    } catch (err) {
+      // State update failure should not mask the original result
+      logError("memory:dream", `failed to update state: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    // Log outcome
+    if (errors.length > 0) {
+      logError("memory:dream", `completed with errors: ${errors.join("; ")}`)
+    } else {
+      logInfo("memory:dream", `completed successfully: ${phases.join(" -> ")}`)
+    }
+
+    // Release lock — best-effort, never throw from finally
+    try {
+      await releaseLock(lockPath)
+    } catch (err) {
+      logError("memory:dream", `failed to release lock: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 }

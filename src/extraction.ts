@@ -1,23 +1,27 @@
 /**
- * opencode-memory — KAIROS Session Memory Extraction
+ * opencode-memory — Extraction: Fact-to-Knowledge Transformer
  *
- * KAIROS (Key-point Accumulation In Real-time, Optimized for Storage):
- * Append-only during the active session (main agent writes terse log entries
- * to daily logs at zero LLM cost). A structured batch extraction fires on
- * session.idle: it reads the full conversation history, distills key
- * information into a structured session-notes file, and writes it to
- * session-memory/{sessionId}.md.
+ * Reads the immutable fact record (captured by capture.ts) plus a recent
+ * message snapshot, sends them to an extraction LLM sub-agent, and writes
+ * the distilled output to semantic/sessions/session_xxx.md with provenance
+ * frontmatter.
  *
- * This two-phase approach separates:
- * 1. Write-heavy logging (no model call, main agent's appended entries)
- * 2. Occasional structured extraction (one LLM call per idle event)
+ * Design principle: the fact record is the PRIMARY input — not the raw
+ * conversation. Extraction is a fact-to-knowledge transformer. LLM failure
+ * does not lose data; the fact record is already on disk. Processing
+ * metadata tracks the extraction lifecycle for retry policy.
  *
- * The resulting session memory file serves as a compact, queryable snapshot
- * that the recall pipeline can surface in future sessions.
+ * See: docs/specs/2026-07-10-memory-infrastructure-design.md § Processing Layer → tryExtraction
  */
 
-import type { MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js"
+import { readFile, writeFile, mkdir } from "fs/promises"
+import { dirname, join } from "path"
+import type { MemoryPluginConfig, AgentSessionCreateOptions, MemoryHeader } from "./config.js"
 import type { MemoryStore } from "./store.js"
+import type { RuntimeAdapter } from "./adapter.js"
+import { getFactSessionPath, getProcessingDir } from "./paths.js"
+import { updateState } from "./state.js"
+import { info as logInfo, error as logError } from "./log.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -79,22 +83,91 @@ interface SessionMessage {
   content?: string | ContentPart[]
 }
 
+/**
+ * Fact record shape (mirrors capture.ts FactSessionRecord — not imported
+ * from capture.ts to avoid coupling; this is a read-only JSON consumer).
+ */
+interface FactSessionRecord {
+  $id: string
+  session_id: string
+  created_at: string
+  ended_at: string
+  project: string
+  project_dir: string
+  runtime: {
+    opencode_version: string
+    plugin_version: string
+    model: string
+  }
+  git: {
+    branch: string
+    head: string
+    changed_files: Array<{ path: string; changes: string }>
+  }
+  stats: {
+    messages: number
+    tool_calls: number
+    duration_minutes: number
+  }
+  events: Array<{
+    type: string
+    name: string
+    success: boolean
+    duration_ms: number
+  }>
+  integrity: {
+    hash: string
+  }
+}
+
+/** Extraction failure classification for retry policy. */
+type FailureType = "timeout" | "model_unavailable" | "invalid_schema" | "permission_denied" | null
+
+/** Extraction lifecycle status stored in processing metadata. */
+interface ExtractionStatus {
+  status: "done" | "failed"
+  attempts: number
+  last_error: string | null
+  retry_after: string | null
+  failure_type: FailureType
+  semantic_file: string | null
+}
+
+/** Processing metadata file shape (mutable, updated per extraction attempt). */
+interface ProcessingMetadata {
+  $id: string
+  session_id: string
+  extraction: ExtractionStatus
+}
+
 // ---------------------------------------------------------------------------
-// Session memory file helpers
+// Path helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the relative path for a session's memory file within the store.
+ * Compute the relative path for a session's semantic memory file.
  *
- * The returned path sits under `session-memory/` so the store's path-traversal
- * guard (`resolvePath` rejects `..` sequences) provides a safety net.
+ * The returned path sits under `semantic/sessions/` so the store's
+ * path-traversal guard provides a safety net.
  */
-function sessionMemoryPath(sessionId: string): string {
-  // Allow only safe characters — strip anything that could confuse the
-  // filesystem or the store's path resolver.
+function sessionSemanticPath(sessionId: string): string {
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "-")
-  return `session-memory/${safe}.md`
+  return `semantic/sessions/session_${safe}.md`
 }
+
+/**
+ * Get the absolute path for the processing metadata status file.
+ *
+ * Path: <memoryDir>/processing/extraction/session_xxx.status.json
+ */
+function getProcessingMetadataPath(memoryDir: string, sessionId: string): string {
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "-")
+  return join(getProcessingDir(memoryDir), "extraction", `session_${safe}.status.json`)
+}
+
+// ---------------------------------------------------------------------------
+// Conversation text extraction
+// ---------------------------------------------------------------------------
 
 /**
  * Extract human-readable conversation text from an array of message objects.
@@ -102,10 +175,11 @@ function sessionMemoryPath(sessionId: string): string {
  * Handles both string content and multi-part arrays (OpenAI-style content
  * blocks with `{ type: "text", text: "..." }`).
  */
-function extractConversationText(messages: SessionMessage[]): string {
+function extractConversationText(messages: unknown[]): string {
   const lines: string[] = []
 
-  for (const msg of messages) {
+  for (const raw of messages) {
+    const msg = raw as SessionMessage
     if (msg.role !== "user" && msg.role !== "assistant") continue
 
     const label = msg.role === "user" ? "User" : "Assistant"
@@ -135,30 +209,51 @@ function extractConversationText(messages: SessionMessage[]): string {
   return lines.join("\n").trim()
 }
 
+// ---------------------------------------------------------------------------
+// Prompt building
+// ---------------------------------------------------------------------------
+
 /**
  * Build the prompt sent to the extraction LLM agent.
  *
- * Includes the current session notes (for incremental update) and the full
- * conversation text. The rules are designed to produce stable, info-dense
- * output that preserves the template structure.
+ * Includes:
+ * - Current session notes (for incremental update)
+ * - Fact record summary (from the immutable fact layer)
+ * - Recent message snapshot (conversation text)
+ * - Existing semantic memories (to avoid duplicate extraction)
+ *
+ * The rules are designed to produce stable, info-dense output that
+ * preserves the template structure.
  */
 function buildExtractionPrompt(
   currentContent: string,
   conversationText: string,
   maxSectionLength: number,
+  factSummary: string,
+  existingMemories: string,
 ): string {
   const sections = [
-    "Based on the conversation below, update the session notes file.",
+    "Based on the fact record and conversation below, update the session notes file.",
     "",
     "Current notes:",
     "<current_notes>",
     currentContent,
     "</current_notes>",
     "",
-    "Conversation:",
+    "Fact Record Summary:",
+    "<fact_record>",
+    factSummary,
+    "</fact_record>",
+    "",
+    "Conversation (recent message snapshot):",
     "<conversation>",
     conversationText,
     "</conversation>",
+    "",
+    "Existing memories (do NOT duplicate these):",
+    "<existing_memories>",
+    existingMemories,
+    "</existing_memories>",
     "",
     "Rules:",
     "- Maintain section headers and italic descriptions exactly",
@@ -167,12 +262,17 @@ function buildExtractionPrompt(
     "- Skip sections with no new info — don't add filler",
     `- Keep each section under ${maxSectionLength} tokens`,
     '- Always update "Current State" to reflect most recent work',
+    "- Do NOT recreate memories that already exist in <existing_memories>",
     "",
     "Output the COMPLETE updated file content.",
   ]
 
   return sections.join("\n")
 }
+
+// ---------------------------------------------------------------------------
+// Response extraction
+// ---------------------------------------------------------------------------
 
 /**
  * Safely extract the response text from an LLM agent's reply.
@@ -189,6 +289,16 @@ function extractResponseText(response: unknown): string {
   const obj = response as Record<string, unknown>
 
   if (typeof obj.content === "string") return obj.content
+  if (typeof obj.response === "string") return obj.response
+  if (typeof obj.text === "string") return obj.text
+
+  // Handle SDK message shape: { info: AssistantMessage, parts: [{ type: "text", text: "..." }] }
+  if (Array.isArray(obj.parts)) {
+    const textParts = (obj.parts as Array<Record<string, unknown>>)
+      .filter((p) => p && typeof p === "object" && p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text as string)
+    if (textParts.length > 0) return textParts.join("\n")
+  }
 
   const message = obj.message
   if (message !== null && typeof message === "object") {
@@ -213,148 +323,558 @@ function extractResponseText(response: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
+// Fact record formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a fact record into a human-readable summary for the extraction
+ * prompt. Provides the LLM with factual context (stats, git state, tool
+ * events) without the full conversation — the conversation comes from the
+ * message snapshot.
+ */
+function formatFactSummary(record: FactSessionRecord): string {
+  const lines: string[] = [
+    `Session: ${record.session_id}`,
+    `Project: ${record.project}`,
+    `Duration: ${record.stats.duration_minutes} minutes`,
+    `Messages: ${record.stats.messages}`,
+    `Tool calls: ${record.stats.tool_calls}`,
+    `Created: ${record.created_at}`,
+    `Ended: ${record.ended_at}`,
+  ]
+
+  if (record.git.branch) {
+    lines.push(`Git branch: ${record.git.branch}`)
+  }
+  if (record.git.head) {
+    lines.push(`Git HEAD: ${record.git.head}`)
+  }
+  if (record.git.changed_files.length > 0) {
+    lines.push("Changed files:")
+    for (const f of record.git.changed_files) {
+      lines.push(`  ${f.path} (${f.changes})`)
+    }
+  }
+  if (record.events.length > 0) {
+    lines.push("Tool events:")
+    for (const e of record.events) {
+      const status = e.success ? "success" : "failed"
+      lines.push(`  ${e.name} (${e.type}, ${status}, ${e.duration_ms}ms)`)
+    }
+  }
+
+  return lines.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Existing memories formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Format existing memory headers into a compact manifest for the extraction
+ * prompt. Only includes files with a recognized type (filters out raw logs
+ * and other non-memory .md files). This tells the LLM what already exists
+ * so it doesn't duplicate.
+ */
+function formatExistingMemories(headers: MemoryHeader[]): string {
+  const memories = headers.filter((m) => m.type !== undefined)
+  if (memories.length === 0) return "(none)"
+
+  return memories
+    .map((m) => {
+      const tag = m.scope !== undefined && m.type !== undefined
+        ? `[${m.scope}:${m.type}]`
+        : m.type !== undefined
+          ? `[${m.type}]`
+          : ""
+      const desc = m.description !== null ? `: ${m.description}` : ""
+      return `- ${tag} ${m.filename}${desc}`
+    })
+    .join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// Provenance frontmatter
+// ---------------------------------------------------------------------------
+
+/**
+ * Build provenance frontmatter for a semantic session memory file.
+ *
+ * Schema v2 provenance links the extracted memory back to its source fact
+ * record via `fact_id`, and marks the confidence level as `inferred`
+ * (LLM extraction inferred this from facts).
+ */
+function buildProvenanceFrontmatter(sessionId: string): string {
+  return [
+    "---",
+    "type: project",
+    "source:",
+    "  kind: extraction",
+    `  fact_id: ${sessionId}`,
+    "confidence:",
+    "  level: inferred",
+    "schema_version: 2",
+    "---",
+    "",
+  ].join("\n")
+}
+
+/**
+ * Strip leading YAML frontmatter from a file's content.
+ *
+ * Used when reading an existing semantic session memory file for
+ * incremental update — the frontmatter is added back after the LLM
+ * produces the updated content.
+ */
+function stripFrontmatter(content: string): string {
+  const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  if (match) return content.slice(match[0].length)
+  return content
+}
+
+// ---------------------------------------------------------------------------
+// Failure classification and retry policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify an extraction failure into a retry-policy category.
+ *
+ * The classification determines whether the failure is retryable and
+ * how long to wait before retrying.
+ *
+ * - `timeout` → retryable, retry on next idle
+ * - `model_unavailable` → retryable, retry after 1 hour
+ * - `invalid_schema` → NOT retryable (fix the prompt first)
+ * - `permission_denied` → NOT retryable (manual intervention)
+ * - `null` (unknown) → retryable with 1 hour delay
+ */
+function classifyFailure(err: unknown): FailureType {
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+
+  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("aborted")) {
+    return "timeout"
+  }
+  if (
+    lower.includes("unavailable") ||
+    lower.includes("econnrefused") ||
+    lower.includes("503") ||
+    lower.includes("502") ||
+    lower.includes("connection")
+  ) {
+    return "model_unavailable"
+  }
+  if (
+    lower.includes("permission") ||
+    lower.includes("forbidden") ||
+    lower.includes("403") ||
+    lower.includes("unauthorized")
+  ) {
+    return "permission_denied"
+  }
+  if (lower.includes("schema") || lower.includes("invalid")) {
+    return "invalid_schema"
+  }
+
+  return null
+}
+
+/**
+ * Compute the `retry_after` timestamp for a given failure type.
+ *
+ * - `timeout` → now (eligible for retry on next idle event)
+ * - `model_unavailable` → +1 hour
+ * - `invalid_schema` → null (not retryable)
+ * - `permission_denied` → null (not retryable)
+ * - `null` (unknown) → +1 hour
+ */
+function computeRetryAfter(failureType: FailureType): string | null {
+  const now = new Date()
+  switch (failureType) {
+    case "timeout":
+      return now.toISOString()
+    case "model_unavailable":
+      return new Date(now.getTime() + 3_600_000).toISOString()
+    case "invalid_schema":
+      return null
+    case "permission_denied":
+      return null
+    default:
+      return new Date(now.getTime() + 3_600_000).toISOString()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Processing metadata read/write
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the existing processing metadata for a session.
+ *
+ * Returns null if the file doesn't exist or is unreadable — the caller
+ * treats this as a fresh extraction (attempts = 0).
+ */
+async function readProcessingMetadata(
+  memoryDir: string,
+  sessionId: string,
+): Promise<ProcessingMetadata | null> {
+  try {
+    const path = getProcessingMetadataPath(memoryDir, sessionId)
+    const raw = await readFile(path, { encoding: "utf-8" })
+    return JSON.parse(raw) as ProcessingMetadata
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Write processing metadata for a session.
+ *
+ * Merges with any existing file content to preserve other sections (e.g.,
+ * dream status) that may have been written by other pipeline stages.
+ * The `extraction` section is always fully replaced.
+ */
+async function writeProcessingMetadata(
+  memoryDir: string,
+  sessionId: string,
+  extraction: ExtractionStatus,
+): Promise<void> {
+  const path = getProcessingMetadataPath(memoryDir, sessionId)
+
+  // Preserve existing sections (e.g., dream) by merging
+  let existing: Record<string, unknown> = {}
+  try {
+    const raw = await readFile(path, { encoding: "utf-8" })
+    existing = JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    // File doesn't exist yet — fresh metadata
+  }
+
+  const metadata: Record<string, unknown> = {
+    ...existing,
+    $id: "memory://processing-extraction/v1",
+    session_id: sessionId,
+    extraction,
+  }
+
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, JSON.stringify(metadata, null, 2), { encoding: "utf-8" })
+}
+
+// ---------------------------------------------------------------------------
+// State recording helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Record an extraction failure: write processing metadata, update state.json,
+ * and log to stderr. Never throws — all errors are swallowed.
+ */
+async function recordExtractionFailure(
+  memoryDir: string,
+  sessionId: string,
+  statePath: string,
+  errorMsg: string,
+  failureType: FailureType,
+): Promise<void> {
+  const retryAfter = computeRetryAfter(failureType)
+  const now = new Date().toISOString()
+
+  // Read existing attempts count and increment
+  const existing = await readProcessingMetadata(memoryDir, sessionId)
+  const attempts = (existing?.extraction.attempts ?? 0) + 1
+
+  // Write processing metadata (failure)
+  try {
+    await writeProcessingMetadata(memoryDir, sessionId, {
+      status: "failed",
+      attempts,
+      last_error: errorMsg,
+      retry_after: retryAfter,
+      failure_type: failureType,
+      semantic_file: null,
+    })
+  } catch {
+    // Best-effort — state.json is the fallback record
+  }
+
+  // Update state.json
+  try {
+    await updateState(statePath, (s) => {
+      s.extraction.total_failures++
+      s.extraction.last_failure_at = now
+      s.extraction.last_error = errorMsg
+    })
+  } catch {
+    // Non-critical — extraction is advisory
+  }
+
+  logError("memory:extraction", `session=${sessionId} error=${errorMsg}`)
+}
+
+/**
+ * Record an extraction success: write processing metadata, update state.json,
+ * and log to stdout. Never throws — all errors are swallowed.
+ */
+async function recordExtractionSuccess(
+  memoryDir: string,
+  sessionId: string,
+  statePath: string,
+  semanticFile: string,
+): Promise<void> {
+  const now = new Date().toISOString()
+
+  // Read existing attempts count and increment
+  const existing = await readProcessingMetadata(memoryDir, sessionId)
+  const attempts = (existing?.extraction.attempts ?? 0) + 1
+
+  // Write processing metadata (success)
+  try {
+    await writeProcessingMetadata(memoryDir, sessionId, {
+      status: "done",
+      attempts,
+      last_error: null,
+      retry_after: null,
+      failure_type: null,
+      semantic_file: semanticFile,
+    })
+  } catch {
+    // Best-effort — state.json is the fallback record
+  }
+
+  // Update state.json
+  try {
+    await updateState(statePath, (s) => {
+      s.extraction.total_successes++
+      s.extraction.last_success_at = now
+    })
+  } catch {
+    // Non-critical — extraction is advisory
+  }
+
+  logInfo("memory:extraction", `session=${sessionId} success`)
+}
+
+// ---------------------------------------------------------------------------
 // Extraction entrypoint
 // ---------------------------------------------------------------------------
 
 /**
- * Run KAIROS extraction on a session.
+ * Run extraction on a session.
  *
- * Reads the session's message history, sends it (along with any existing
- * session notes) to an extraction LLM sub-agent, and writes the distilled
- * output back to the session memory file.
+ * Reads the immutable fact record (captured by capture.ts) plus a recent
+ * message snapshot, sends them to an extraction LLM sub-agent via the
+ * RuntimeAdapter, and writes the distilled output to
+ * `semantic/sessions/session_xxx.md` with provenance frontmatter.
  *
- * The extraction runs in its own sub-session via `client.session.create` so
- * it does not pollute the main agent's context window. Failures are reported
- * gracefully — extraction is advisory, not critical path.
+ * The extraction runs in its own sub-session via `adapter.session.create`
+ * so it does not pollute the main agent's context window.
  *
- * @param sessionId - The ID of the session whose messages to extract.
- * @param store     - The memory store for reading/writing session notes.
- * @param config    - Plugin configuration (extraction settings).
- * @param client    - OpenCode client API for session operations.
+ * After each attempt (success or failure), processing metadata is written
+ * to `processing/extraction/session_xxx.status.json` with retry policy
+ * information, and state.json is updated.
+ *
+ * All failures are caught and logged — extraction never throws. The fact
+ * record is already on disk, so LLM failure only delays knowledge
+ * formation, it does not lose data.
+ *
+ * @param sessionId  - The ID of the session to extract.
+ * @param memoryDir  - Absolute path to the memory directory.
+ * @param store      - The memory store for reading/writing semantic files.
+ * @param config     - Plugin configuration (extraction settings).
+ * @param adapter    - Runtime adapter for session/prompt/message access.
+ * @param statePath  - Absolute path to state.json.
  *
  * @returns `{ success: true }` on completion, or `{ success: false, error }`
  *          on any failure.
  */
 export async function extractSessionMemory(
   sessionId: string,
+  memoryDir: string,
   store: MemoryStore,
   config: MemoryPluginConfig,
-  client: {
-    session: {
-      create: (opts: AgentSessionCreateOptions) => Promise<{ id: string }>
-      chat: (id: string, opts: { message: string }) => Promise<unknown>
-      messages: (id: string) => Promise<SessionMessage[]>
-    }
-  },
+  adapter: RuntimeAdapter,
+  statePath: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const filename = sessionMemoryPath(sessionId)
+  const semanticFile = sessionSemanticPath(sessionId)
 
   try {
-    // ────────────────────────────────────────────────────────────────
-    // Step 1: Bootstrap session notes if they don't exist yet
-    // ────────────────────────────────────────────────────────────────
-    const exists = await store.exists(filename)
-    if (!exists) {
-      await store.write(filename, DEFAULT_SESSION_MEMORY_TEMPLATE)
+    // ────────────────────────────────────────────────────────────────────
+    // Step 1: Read the fact record (immutable, already captured)
+    //
+    // The fact record is the PRIMARY input. If it doesn't exist, capture
+    // didn't run — extraction cannot proceed. This is a failure, but the
+    // raw conversation is still in the OpenCode session history (just not
+    // captured as a structured fact record).
+    // ────────────────────────────────────────────────────────────────────
+    const factPath = getFactSessionPath(memoryDir, sessionId)
+    let factRecord: FactSessionRecord
+    try {
+      const raw = await readFile(factPath, { encoding: "utf-8" })
+      factRecord = JSON.parse(raw) as FactSessionRecord
+    } catch {
+      const errorMsg = `No fact record found for session ${sessionId} at ${factPath}`
+      await recordExtractionFailure(memoryDir, sessionId, statePath, errorMsg, null)
+      return { success: false, error: errorMsg }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 2: Read current content (fresh from disk, may differ from
-    //         what we just wrote if a concurrent extraction raced us)
-    // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
+    // Step 2: Read existing session notes (for incremental update)
+    //
+    // If a previous extraction wrote a semantic session memory file, read
+    // it so the LLM can update it incrementally rather than starting from
+    // scratch. The provenance frontmatter is stripped before sending to
+    // the LLM — it's re-added after the LLM produces output.
+    // ────────────────────────────────────────────────────────────────────
     let currentContent: string
-    try {
-      currentContent = await store.read(filename)
-    } catch {
-      // File was deleted between exists() and read() — re-bootstrap
-      await store.write(filename, DEFAULT_SESSION_MEMORY_TEMPLATE)
+    const fileExists = await store.exists(semanticFile)
+    if (fileExists) {
+      try {
+        const raw = await store.read(semanticFile)
+        currentContent = stripFrontmatter(raw)
+      } catch {
+        currentContent = DEFAULT_SESSION_MEMORY_TEMPLATE
+      }
+    } else {
       currentContent = DEFAULT_SESSION_MEMORY_TEMPLATE
     }
 
     if (currentContent.trim().length === 0) {
-      // Empty file from a prior write — reset to template
       currentContent = DEFAULT_SESSION_MEMORY_TEMPLATE
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 3: Fetch session messages and extract conversation text
-    // ────────────────────────────────────────────────────────────────
-    const messages = await client.session.messages(sessionId)
+    // ────────────────────────────────────────────────────────────────────
+    // Step 3: Read recent message snapshot
+    //
+    // The fact record provides stats and tool events, but the actual
+    // conversation content comes from a limited message snapshot. This
+    // keeps the prompt focused on recent context. If the adapter can't
+    // return messages, extraction proceeds with the fact record alone.
+    // ────────────────────────────────────────────────────────────────────
+    let messages: unknown[] = []
+    try {
+      messages = await adapter.session.messages(sessionId, 30)
+    } catch {
+      // Message snapshot is optional — fact record provides context
+    }
     const conversationText = extractConversationText(messages)
 
-    if (conversationText.length === 0) {
-      // No user or assistant messages to extract from — this is not an
-      // error, just nothing to do.
-      return { success: true }
+    // ────────────────────────────────────────────────────────────────────
+    // Step 4: Read existing semantic memories (avoid duplicate extraction)
+    //
+    // The prompt includes a manifest of existing memories so the LLM
+    // knows what's already been saved and doesn't recreate duplicates.
+    // ────────────────────────────────────────────────────────────────────
+    let existingMemories = "(none)"
+    try {
+      const headers = await store.list()
+      existingMemories = formatExistingMemories(headers)
+    } catch {
+      // Listing failed — proceed without existing memories list
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 4: Build the extraction prompt
-    // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
+    // Step 5: Build the extraction prompt
+    // ────────────────────────────────────────────────────────────────────
+    const factSummary = formatFactSummary(factRecord)
     const prompt = buildExtractionPrompt(
       currentContent,
       conversationText,
       config.extraction.maxSectionLength,
+      factSummary,
+      existingMemories,
     )
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 5: Spawn an extraction sub-agent
+    // ────────────────────────────────────────────────────────────────────
+    // Step 6: Spawn an extraction sub-agent session
     //
     // The extraction agent runs in its own session with the configured
     // category (default: "quick"). This avoids injecting extraction
     // tokens into the main agent's context.
-    //
-    // Wrapped in try/catch for graceful degradation — if the agent
-    // framework is unavailable, we report the failure and move on.
-    // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
     let extractSessionId: string
     try {
-      const createOpts: AgentSessionCreateOptions = { agent: config.extraction.category }
+      const createOpts: AgentSessionCreateOptions = {}
       if (config.models.extraction) createOpts.model = config.models.extraction
-      const extractSession = await client.session.create(createOpts)
+      const extractSession = await adapter.session.create(createOpts)
       extractSessionId = extractSession.id
-    } catch {
-      return {
-        success: false,
-        error: "Failed to create extraction agent session",
-      }
+    } catch (err: unknown) {
+      const errorMsg = `Failed to create extraction agent session: ${
+        err instanceof Error ? err.message : "unknown error"
+      }`
+      await recordExtractionFailure(
+        memoryDir,
+        sessionId,
+        statePath,
+        errorMsg,
+        classifyFailure(err),
+      )
+      return { success: false, error: errorMsg }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 6: Send the prompt and collect the response
-    // ────────────────────────────────────────────────────────────────
+    // ────────────────────────────────────────────────────────────────────
+    // Step 7: Send the prompt and collect the response
+    //
+    // Uses adapter.session.prompt() (NOT chat()). The prompt is sent to
+    // the sub-agent session created in Step 6.
+    // ────────────────────────────────────────────────────────────────────
     let response: unknown
     try {
-      response = await client.session.chat(extractSessionId, {
-        message: prompt,
-      })
+      const promptOpts: { agent?: string; model?: string } = {}
+      if (config.models.extraction) promptOpts.model = config.models.extraction
+      response = await adapter.session.prompt(extractSessionId, prompt, promptOpts)
     } catch (err: unknown) {
-      return {
-        success: false,
-        error: `Extraction agent chat failed: ${
-          err instanceof Error ? err.message : "unknown error"
-        }`,
-      }
+      const errorMsg = `Extraction agent prompt failed: ${
+        err instanceof Error ? err.message : "unknown error"
+      }`
+      await recordExtractionFailure(
+        memoryDir,
+        sessionId,
+        statePath,
+        errorMsg,
+        classifyFailure(err),
+      )
+      return { success: false, error: errorMsg }
     }
 
     const responseText = extractResponseText(response)
 
     if (!responseText || responseText.trim().length === 0) {
-      return {
-        success: false,
-        error: "Extraction agent returned empty response",
-      }
+      const errorMsg = "Extraction agent returned empty response"
+      await recordExtractionFailure(
+        memoryDir,
+        sessionId,
+        statePath,
+        errorMsg,
+        null,
+      )
+      return { success: false, error: errorMsg }
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Step 7: Write the distilled output back to the session memory file
-    // ────────────────────────────────────────────────────────────────
-    await store.write(filename, responseText)
+    // ────────────────────────────────────────────────────────────────────
+    // Step 8: Write the semantic session memory file with provenance
+    //
+    // The LLM response (template content) is prepended with provenance
+    // frontmatter linking it back to the source fact record.
+    // ────────────────────────────────────────────────────────────────────
+    const provenance = buildProvenanceFrontmatter(sessionId)
+    const semanticContent = provenance + responseText
+    await store.write(semanticFile, semanticContent)
+
+    // ────────────────────────────────────────────────────────────────────
+    // Step 9: Record success — processing metadata + state.json
+    // ────────────────────────────────────────────────────────────────────
+    await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
 
     return { success: true }
   } catch (err: unknown) {
-    const message =
-      err instanceof Error ? err.message : "Unknown extraction error"
-    return { success: false, error: message }
+    const errorMsg = err instanceof Error ? err.message : "Unknown extraction error"
+    await recordExtractionFailure(
+      memoryDir,
+      sessionId,
+      statePath,
+      errorMsg,
+      null,
+    )
+    return { success: false, error: errorMsg }
   }
 }

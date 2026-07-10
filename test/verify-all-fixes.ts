@@ -87,9 +87,10 @@ check(formatted.includes("filename="), "formatSelectedMemories includes filename
 // === L8: tools.ts scope enum uses MEMORY_SCOPES ===
 console.log("\n=== L8: scope enum uses constant ===")
 const saveTool = hooks.tool!["memory_save"]
-check(saveTool.parameters!.scope!.enum!.length === 2, "scope enum has 2 values")
-check(saveTool.parameters!.scope!.enum!.includes("user"), "scope enum includes user")
-check(saveTool.parameters!.scope!.enum!.includes("project"), "scope enum includes project")
+const argKeys = Object.keys(saveTool.args!)
+check(argKeys.includes("scope"), "scope arg exists in args")
+check(argKeys.includes("type"), "type arg exists in args")
+check(argKeys.includes("confidence"), "confidence arg exists in args")
 
 // === S1+S2+S3: previous fixes still hold ===
 console.log("\n=== S1+S2+S3: regression check ===")

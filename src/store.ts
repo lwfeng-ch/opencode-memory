@@ -9,8 +9,8 @@
  * OpenCode hooks. It is a pure data layer.
  */
 
-import { join, basename, isAbsolute } from "path"
-import { mkdir, readdir, readFile, writeFile, unlink, stat, appendFile } from "fs/promises"
+import { join, basename, isAbsolute, dirname } from "path"
+import { mkdir, readdir, readFile, writeFile, unlink, stat, appendFile, open } from "fs/promises"
 import type { MemoryHeader } from "./config.js"
 import { parseConfidence } from "./config.js"
 
@@ -103,10 +103,18 @@ export class FileSystemStore implements MemoryStore {
         mdFiles.map(async (relativePath): Promise<MemoryHeader> => {
           const filePath = join(this.dir, relativePath)
           const stats = await stat(filePath)
-          // Read only first N lines for frontmatter
-          const content = await readFile(filePath, { encoding: "utf-8" })
-          const lines = content.split("\n", this.frontmatterMaxLines)
-          const fm = parseFrontmatter(lines.join("\n"))
+          // Read only the first few KB for frontmatter (avoid reading entire large files)
+          const fh = await open(filePath, "r")
+          let fm: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number }
+          try {
+            const buf = Buffer.alloc(4096)
+            const { bytesRead } = await fh.read(buf, 0, 4096, 0)
+            const content = buf.subarray(0, bytesRead).toString("utf-8")
+            const lines = content.split("\n", this.frontmatterMaxLines)
+            fm = parseFrontmatter(lines.join("\n"))
+          } finally {
+            await fh.close()
+          }
           return {
             filename: relativePath,
             filePath,
@@ -140,14 +148,14 @@ export class FileSystemStore implements MemoryStore {
 
   async write(filename: string, content: string): Promise<void> {
     const filePath = this.resolvePath(filename)
-    await mkdir(join(filePath, ".."), { recursive: true })
+    await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, { encoding: "utf-8" })
   }
 
   async append(filename: string, entry: string): Promise<void> {
     const filePath = this.resolvePath(filename)
     // Create parent dirs if needed
-    await mkdir(join(filePath, ".."), { recursive: true })
+    await mkdir(dirname(filePath), { recursive: true })
     await appendFile(filePath, entry, { encoding: "utf-8" })
   }
 

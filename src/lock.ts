@@ -39,9 +39,20 @@ export async function acquireLock(lockPath: string, staleTimeoutMs: number): Pro
     const isStale = Date.now() - stats.mtimeMs > staleTimeoutMs;
 
     // Overwrite if holder is dead or lock is stale
+    // Delete then re-create with 'wx' to avoid TOCTOU race with another process
     if (!isAlive || isStale) {
-      await writeFile(lockPath, String(process.pid), { flag: 'w' });
-      return true;
+      try {
+        await unlink(lockPath);
+      } catch {
+        // File may have been deleted by another process — try create anyway
+      }
+      try {
+        await writeFile(lockPath, String(process.pid), { flag: 'wx' });
+        return true;
+      } catch {
+        // Another process acquired the lock between our delete and create
+        return false;
+      }
     }
 
     // Lock is held by a live process and fresh

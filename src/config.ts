@@ -28,7 +28,7 @@ import { fileURLToPath } from "url"
  *   back to the default for the chosen agent category.
  */
 export interface AgentSessionCreateOptions {
-  agent: string
+  agent?: string
   model?: string
 }
 
@@ -186,17 +186,25 @@ export interface MemoryPluginConfig {
    * Four-phase pipeline: Orient → Gather → Consolidate → Prune.
    * Runs when three gates pass (cheapest-first).
    */
-  dream: {
+   dream: {
     /** Category for the dream subagent. */
     category: string
     /** Min hours since last consolidation. */
     minHoursSinceLast: number
     /** Min sessions touched since last consolidation. */
     minSessionsSinceLast: number
+    /** Min messages since last dream. 0 = disabled, use time+session gates instead.
+     *  When > 0, triggers dream after N messages accumulate across sessions.
+     *  Example: 30 = trigger dream after 30 total messages since last dream run. */
+    minMessagesSinceLast: number
     /** Lock stale timeout (ms) — defense against PID reuse. */
     lockStaleTimeoutMs: number
     /** Enable/disable auto-dream. */
     enabled: boolean
+    /** Gate mode: development (every idle), normal (24h+5 sessions), production (7 days + memory pressure). */
+    mode: "development" | "normal" | "production"
+    /** Memory pressure threshold — trigger dream when memory count exceeds this. */
+    memoryPressure: number
   }
 
   /** Staleness warnings — pure computation, no model. */
@@ -232,6 +240,16 @@ export interface MemoryPluginConfig {
     userScopeEnabled: boolean
     /** Recall priority: project memories override user memories on conflict. */
     projectOverridesUser: boolean
+  }
+
+  /** Logging configuration — route [memory:*] output to file, keep terminal clean. */
+  logging: {
+    /** Write logs to console (stdout/stderr). Default: false. */
+    console: boolean
+    /** Write logs to file. Default: true. */
+    file: boolean
+    /** Minimum level: debug | info | warn | error. */
+    level: string
   }
 }
 
@@ -271,8 +289,12 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
     category: "deep",
     minHoursSinceLast: 24,
     minSessionsSinceLast: 5,
+    // 0 = disabled (use time+session gates). Set >0 to trigger by message count.
+    minMessagesSinceLast: 0,
     lockStaleTimeoutMs: 3_600_000, // 1 hour
     enabled: true,
+    mode: "normal",
+    memoryPressure: 500,
   },
 
   staleness: {
@@ -300,6 +322,12 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
   scope: {
     userScopeEnabled: true,
     projectOverridesUser: true,
+  },
+
+  logging: {
+    console: false,
+    file: true,
+    level: "debug",
   },
 }
 
@@ -370,7 +398,10 @@ interface ConfigFile {
       category?: string
       min_hours_since_last?: number
       min_sessions_since_last?: number
+      min_messages_since_last?: number
       lock_stale_timeout_ms?: number
+      mode?: string
+      memory_pressure?: number
     }
     staleness?: {
       warn_after_days?: number
@@ -392,6 +423,11 @@ interface ConfigFile {
   scan?: {
     max_files?: number
     frontmatter_max_lines?: number
+  }
+  logging?: {
+    console?: boolean
+    file?: boolean
+    level?: string
   }
 }
 
@@ -440,8 +476,11 @@ export async function loadConfig(
         category: file.features?.dream?.category ?? dreamDefaults.category,
         minHoursSinceLast: file.features?.dream?.min_hours_since_last ?? dreamDefaults.minHoursSinceLast,
         minSessionsSinceLast: file.features?.dream?.min_sessions_since_last ?? dreamDefaults.minSessionsSinceLast,
+        minMessagesSinceLast: file.features?.dream?.min_messages_since_last ?? dreamDefaults.minMessagesSinceLast,
         lockStaleTimeoutMs: file.features?.dream?.lock_stale_timeout_ms ?? dreamDefaults.lockStaleTimeoutMs,
         enabled: file.features?.dream?.enabled ?? dreamDefaults.enabled,
+        mode: (file.features?.dream?.mode ?? dreamDefaults.mode) as "development" | "normal" | "production",
+        memoryPressure: file.features?.dream?.memory_pressure ?? dreamDefaults.memoryPressure,
       },
 
       staleness: {
@@ -467,6 +506,12 @@ export async function loadConfig(
       scope: {
         userScopeEnabled: file.features?.scope?.user_scope_enabled ?? DEFAULT_CONFIG.scope.userScopeEnabled,
         projectOverridesUser: file.features?.scope?.project_overrides_user ?? DEFAULT_CONFIG.scope.projectOverridesUser,
+      },
+
+      logging: {
+        console: file.logging?.console ?? DEFAULT_CONFIG.logging.console,
+        file: file.logging?.file ?? DEFAULT_CONFIG.logging.file,
+        level: file.logging?.level ?? DEFAULT_CONFIG.logging.level,
       },
     }
   } catch {

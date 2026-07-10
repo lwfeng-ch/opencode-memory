@@ -60,7 +60,7 @@
   },
 
   "scan": {
-    "max_files": 200,
-    "frontmatter_max_lines": 30
+    "max_files": 50,
+    "frontmatter_max_lines": 5
   }
 }

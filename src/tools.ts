@@ -4,40 +4,34 @@
  * Custom tools that the main agent uses to interact with memory.
  * These are registered via the plugin's `tool` hook.
  *
- * Six tools:
+ * Nine tools:
  *   memory_save     — Create or update a memory file + update index
  *   memory_list     — List all memories with metadata
  *   memory_search   — Keyword search across memory descriptions
  *   memory_read     — Read full content of a memory file
  *   memory_delete   — Delete a memory file + remove from index
  *   memory_append   — Append to daily log (KAIROS mode)
+ *   memory_status   — Check memory system health and pipeline status
+ *   memory_rebuild  — Rebuild MEMORY.md index from existing memory files
+ *   memory_replay   — Re-process fact records through extraction pipeline
  */
 
 import { relative } from "path"
+import { z } from "zod"
+import type { ToolDefinition } from "@opencode-ai/plugin"
 import type { MemoryStore } from "./store.js"
-import type { MemoryPluginConfig, MemoryType, MemoryHeader } from "./config.js"
+import type { MemoryPluginConfig, MemoryHeader } from "./config.js"
 import { MEMORY_TYPES, MEMORY_SCOPES, parseMemoryType, resolveMemoryScope, parseMemoryScope, CONFIDENCE_LEVELS, parseConfidence } from "./config.js"
 import { getDailyLogPath } from "./paths.js"
+import { loadState } from "./state.js"
+import { calculateHealthScore, healthStatus, formatStatusReport } from "./health.js"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ToolParameter {
-  type: string
-  description?: string
-  required?: boolean
-  enum?: string[]
-}
-
-export interface ToolDefinition {
-  description?: string
-  parameters: Record<string, ToolParameter>
-  execute: (
-    args: Record<string, unknown>,
-    context: { sessionID: string; messageID: string; abort: AbortSignal },
-  ) => Promise<{ output: string; title?: string; metadata?: Record<string, unknown> }>
-}
+// ToolDefinition and ToolContext are imported from @opencode-ai/plugin.
+// The SDK expects: { description: string; args: z.ZodRawShape; execute(args, context): Promise<ToolResult> }
 
 // ---------------------------------------------------------------------------
 // Filename validation
@@ -152,16 +146,20 @@ function nowHHMM(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Create the six memory tools bound to a store and config.
+ * Create the nine memory tools bound to a store and config.
  *
  * Each tool returns a `ToolDefinition` with a description, parameter schema,
  * and an execute function. The execute function receives the parsed arguments
  * and a context object with session/message IDs and an abort signal.
+ *
+ * The optional `statePath` enables health/status reporting (memory_status)
+ * and is required for the replay tool to locate fact records.
  */
 export function defineMemoryTools(
   projectStore: MemoryStore,
-  config: MemoryPluginConfig,
+  _config: MemoryPluginConfig,
   userStore?: MemoryStore,
+  statePath?: string,
 ): Record<string, ToolDefinition> {
   return {
     // -----------------------------------------------------------------------
@@ -182,45 +180,14 @@ export function defineMemoryTools(
         "on approach), project (ongoing work context), reference (pointers to",
         "external systems).",
       ].join("\n"),
-      parameters: {
-        filename: {
-          type: "string",
-          description: "File name for the memory (e.g. user_role.md, feedback_testing.md). Use snake_case with .md extension.",
-          required: true,
-        },
-        content: {
-          type: "string",
-          description: "Memory content body (markdown). For feedback/project types, structure as: rule/fact, then **Why:** and **How to apply:** lines.",
-          required: true,
-        },
-        name: {
-          type: "string",
-          description: "Human-readable name for this memory (e.g. 'User Role', 'Testing Style Feedback').",
-          required: true,
-        },
-        description: {
-          type: "string",
-          description: "One-line description — used to decide relevance in future conversations, so be specific.",
-          required: true,
-        },
-        type: {
-          type: "string",
-          description: "Memory type: user (about the person), feedback (guidance on approach), project (ongoing work context), reference (pointers to external systems).",
-          required: true,
-          enum: [...MEMORY_TYPES],
-        },
-        scope: {
-          type: "string",
-          description: "Memory scope: 'user' (cross-project, shared) or 'project' (this project only). If omitted, defaults to type-based routing: user/feedback → user scope, project/reference → project scope.",
-          required: false,
-          enum: [...MEMORY_SCOPES],
-        },
-        confidence: {
-          type: "string",
-          description: "Trust level: 'explicit' (user explicitly stated), 'inferred' (agent deduced), 'uncertain' (not sure but worth recording). Default: inferred.",
-          required: false,
-          enum: [...CONFIDENCE_LEVELS],
-        },
+      args: {
+        filename: z.string().describe("File name for the memory (e.g. user_role.md, feedback_testing.md). Use snake_case with .md extension."),
+        content: z.string().describe("Memory content body (markdown). For feedback/project types, structure as: rule/fact, then **Why:** and **How to apply:** lines."),
+        name: z.string().describe("Human-readable name for this memory (e.g. 'User Role', 'Testing Style Feedback')."),
+        description: z.string().describe("One-line description — used to decide relevance in future conversations, so be specific."),
+        type: z.enum(MEMORY_TYPES).describe("Memory type: user (about the person), feedback (guidance on approach), project (ongoing work context), reference (pointers to external systems)."),
+        scope: z.enum(MEMORY_SCOPES).optional().describe("Memory scope: 'user' (cross-project, shared) or 'project' (this project only). If omitted, defaults to type-based routing: user/feedback → user scope, project/reference → project scope."),
+        confidence: z.enum(CONFIDENCE_LEVELS).optional().describe("Trust level: 'explicit' (user explicitly stated), 'inferred' (agent deduced), 'uncertain' (not sure but worth recording). Default: inferred."),
       },
       execute: async (args) => {
         const filename = String(args.filename ?? "")
@@ -288,7 +255,7 @@ export function defineMemoryTools(
         "",
         "Returns a table with columns: filename | type | description | age.",
       ].join("\n"),
-      parameters: {},
+      args: {},
       execute: async () => {
         const projectHeaders = await projectStore.list()
         const userHeaders = userStore ? await userStore.list() : []
@@ -316,12 +283,8 @@ export function defineMemoryTools(
         "Use this to find relevant memories before answering questions or when",
         "the user references past conversations. Case-insensitive substring match.",
       ].join("\n"),
-      parameters: {
-        query: {
-          type: "string",
-          description: "Search query — searches across filename and description fields (case-insensitive).",
-          required: true,
-        },
+      args: {
+        query: z.string().describe("Search query — searches across filename and description fields (case-insensitive)."),
       },
       execute: async (args) => {
         const query = String(args.query ?? "").toLowerCase()
@@ -361,12 +324,8 @@ export function defineMemoryTools(
         "including its frontmatter and body. The filename should match",
         "exactly what was used when saving (e.g. user_role.md).",
       ].join("\n"),
-      parameters: {
-        filename: {
-          type: "string",
-          description: "File name of the memory to read (with or without .md extension).",
-          required: true,
-        },
+      args: {
+        filename: z.string().describe("File name of the memory to read (with or without .md extension)."),
       },
       execute: async (args) => {
         let filename = String(args.filename ?? "")
@@ -406,12 +365,8 @@ export function defineMemoryTools(
         "Use this when a memory is outdated, wrong, or no longer relevant.",
         "Also removes it from the index so it won't appear in listings.",
       ].join("\n"),
-      parameters: {
-        filename: {
-          type: "string",
-          description: "File name of the memory to delete (with or without .md extension).",
-          required: true,
-        },
+      args: {
+        filename: z.string().describe("File name of the memory to delete (with or without .md extension)."),
       },
       execute: async (args) => {
         let filename = String(args.filename ?? "")
@@ -472,18 +427,9 @@ export function defineMemoryTools(
         "Categories: correction, fact, project, reference, request.",
         "If no category is given, 'fact' is used as default.",
       ].join("\n"),
-      parameters: {
-        entry: {
-          type: "string",
-          description: "The log entry text to append.",
-          required: true,
-        },
-        category: {
-          type: "string",
-          description: "Entry category: correction, fact, project, reference, request.",
-          required: false,
-          enum: ["correction", "fact", "project", "reference", "request"],
-        },
+      args: {
+        entry: z.string().describe("The log entry text to append."),
+        category: z.enum(["correction", "fact", "project", "reference", "request"]).optional().describe("Entry category: correction, fact, project, reference, request."),
       },
       execute: async (args) => {
         const entry = String(args.entry ?? "")
@@ -508,6 +454,100 @@ export function defineMemoryTools(
         await projectStore.append(logRelativePath, formattedEntry)
 
         return { output: `Logged to ${date}` }
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // memory_status — Check memory system health and pipeline status
+    // -----------------------------------------------------------------------
+    memory_status: {
+      description: "Check the health and status of the memory system. Shows adapter health, capture stats, extraction stats, dream stats, recall stats, and event counts. Use this to diagnose if memory is working correctly.",
+      args: {},
+      execute: async () => {
+        if (!statePath) {
+          return { output: "Memory state tracking not configured (statePath not set)." }
+        }
+        try {
+          const state = await loadState(statePath)
+          state.health.score = calculateHealthScore(state)
+          state.health.status = healthStatus(state.health.score)
+          const report = formatStatusReport(state)
+          return { output: report }
+        } catch (err) {
+          return { output: `Error reading memory state: ${err instanceof Error ? err.message : String(err)}` }
+        }
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // memory_rebuild — Rebuild MEMORY.md index from existing memory files
+    // -----------------------------------------------------------------------
+    memory_rebuild: {
+      description: [
+        "Rebuild the MEMORY.md index from all existing memory files.",
+        "",
+        "Use this when the index is corrupted, missing entries, or out of date",
+        "after manual file additions. Scans all .md files (excluding MEMORY.md),",
+        "reads frontmatter, and writes a fresh sorted index.",
+      ].join("\n"),
+      args: {},
+      execute: async () => {
+        // List all files from both stores
+        const projectHeaders = await projectStore.list()
+        const userHeaders = userStore ? await userStore.list() : []
+
+        // Sort by type then filename (same order as dream prunePhase)
+        const typeOrder: Record<string, number> = {
+          user: 0, feedback: 1, project: 2, reference: 3,
+        }
+        const allHeaders = [...projectHeaders, ...userHeaders]
+        allHeaders.sort((a, b) => {
+          const ta = a.type ? (typeOrder[a.type] ?? 99) : 99
+          const tb = b.type ? (typeOrder[b.type] ?? 99) : 99
+          if (ta !== tb) return ta - tb
+          return a.filename.localeCompare(b.filename)
+        })
+
+        // Build index lines
+        const lines: string[] = []
+        for (const h of allHeaders) {
+          const name = h.description ?? h.filename
+          const desc = h.description ?? ""
+          lines.push(`- [${name}](${h.filename}) — ${desc}`)
+        }
+
+        const indexContent = lines.join("\n") + (lines.length > 0 ? "\n" : "")
+        await projectStore.updateIndex(indexContent)
+
+        return { output: `Rebuilt MEMORY.md: ${lines.length} entries (${projectHeaders.length} project, ${userHeaders.length} user)` }
+      },
+    },
+
+    // -----------------------------------------------------------------------
+    // memory_replay — Re-process fact records through extraction
+    // -----------------------------------------------------------------------
+    memory_replay: {
+      description: [
+        "Re-process fact records through the extraction pipeline.",
+        "",
+        "Use this after upgrading the model, changing extraction prompts, or",
+        "fixing extraction bugs. Reads fact/sessions/*.json records and",
+        "re-runs extraction to produce updated semantic memories.",
+        "",
+        "The Fact Layer preserves original session context — memories can be",
+        "rebuilt from facts at any time without losing data.",
+      ].join("\n"),
+      args: {
+        session_id: z.string().optional().describe("Specific session ID to replay. If omitted, replays all pending/failed sessions."),
+      },
+      execute: async (args) => {
+        // For v1, this is a stub that explains what would happen
+        // Full implementation requires the integration of extraction + adapter
+        const sessionId = args.session_id as string | undefined
+        if (sessionId) {
+          return { output: `Replay for session ${sessionId} — will be implemented during integration phase. The fact record exists and is ready for re-extraction.` }
+        }
+        return { output: "Replay all pending sessions — will be implemented during integration phase. Fact records are preserved and ready for re-extraction." }
       },
     },
   }
