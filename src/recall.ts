@@ -64,6 +64,38 @@ interface ScoredCandidate {
 }
 
 // ---------------------------------------------------------------------------
+// Active Tool Memory Filter — transient tool debug memories
+// ---------------------------------------------------------------------------
+
+/** Transient markers — temporary errors that shouldn't pollute recall */
+const TRANSIENT_TOOL_MARKERS = [
+  "failed", "failure", "error", "temporary", "debug",
+  "retry", "crashed", "exception", "timed out",
+  "not working", "broken", "wrong",
+];
+
+/** Durable markers — persistent knowledge that survives even with transient keywords */
+const DURABLE_TOOL_MARKERS = [
+  "workaround", "known issue", "gotcha",
+  "requires", "needs", "must use", "should use",
+  "prerequisite", "dependency", "owner",
+  "escalation", "warning", "note", "important",
+  "always", "never", "convention", "standard",
+];
+
+/** Check if a memory is a transient tool-debug memory that should be filtered. */
+function isTransientToolMemory(header: MemoryHeader, recentTools: string[]): boolean {
+  if (recentTools.length === 0) return false
+  const haystack = [header.description ?? "", header.filename].join(" ").toLowerCase()
+  const namesActiveTool = recentTools.some((tool) => haystack.includes(tool.toLowerCase()))
+  if (!namesActiveTool) return false
+  const hasTransient = TRANSIENT_TOOL_MARKERS.some((m) => haystack.includes(m))
+  if (!hasTransient) return false
+  const hasDurable = DURABLE_TOOL_MARKERS.some((m) => haystack.includes(m))
+  return !hasDurable
+}
+
+// ---------------------------------------------------------------------------
 // Stage 1 — Rule filter scoring
 // ---------------------------------------------------------------------------
 
@@ -293,6 +325,7 @@ export async function recallMemories(
       chat: (id: string, opts: { message: string }) => Promise<unknown>;
     };
   },
+  recentTools: string[] = [],
 ): Promise<RecallResult> {
   // -----------------------------------------------------------------------
   // Stage 1: Rule filter
@@ -307,7 +340,12 @@ export async function recallMemories(
 
   const nonZero = scored.filter((s) => s.score > 0);
 
-  if (nonZero.length === 0) {
+  // Filter transient tool-debug memories (e.g. "npm install failed")
+  const filtered = nonZero.filter(
+    (s) => !isTransientToolMemory(s.header, recentTools),
+  );
+
+  if (filtered.length === 0) {
     return {
       memories: [],
       stage1Count: 0,
@@ -316,9 +354,9 @@ export async function recallMemories(
     };
   }
 
-  nonZero.sort((a, b) => b.score - a.score);
+  filtered.sort((a, b) => b.score - a.score);
 
-  const candidateHeaders = nonZero
+  const candidateHeaders = filtered
     .slice(0, config.recall.maxCandidates)
     .map((c) => c.header);
   const stage1Count = candidateHeaders.length;
@@ -493,6 +531,7 @@ export async function recallMemoriesMultiScope(
       chat: (id: string, opts: { message: string }) => Promise<unknown>;
     };
   },
+  recentTools: string[] = [],
 ): Promise<ScopedRecallResult> {
   // -----------------------------------------------------------------------
   // Stage 1: Score both stores independently
@@ -503,8 +542,12 @@ export async function recallMemoriesMultiScope(
     scanMemoryFiles(projectStore),
   ]);
 
-  const userScored = scoreHeaders(query, userHeaders);
-  const projectScored = scoreHeaders(query, projectHeaders);
+  const userScored = scoreHeaders(query, userHeaders).filter(
+    (s) => !isTransientToolMemory(s.header, recentTools),
+  );
+  const projectScored = scoreHeaders(query, projectHeaders).filter(
+    (s) => !isTransientToolMemory(s.header, recentTools),
+  );
 
   // Take top N/2 from each store (minimum 5 per store)
   const perStore = Math.max(5, Math.floor(config.recall.maxCandidates / 2));

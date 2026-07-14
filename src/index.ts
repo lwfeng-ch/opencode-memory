@@ -187,6 +187,8 @@ export const MemoryPlugin: Plugin = async (input) => {
   const sessionToolCount = new Map<string, number>()
   const sessionToolEvents = new Map<string, Array<{ type: string; name: string; success: boolean; durationMs: number }>>()
   const sessionFirstMessage = new Map<string, string>()
+  const sessionRecentTools = new Map<string, string[]>()
+  const MAX_RECENT_TOOLS = 10
 
   return {
     // -----------------------------------------------------------------------
@@ -299,9 +301,10 @@ export const MemoryPlugin: Plugin = async (input) => {
       if (!query || query.length < config.recall.minQueryLength) return
 
       // Fire recall — create RecallHandle (never await in background mode)
+      const recentTools = sessionRecentTools.get(sid) ?? []
       const recallPromise = userStore
-        ? recallMemoriesMultiScope(query, userStore, store, config, recallClient)
-        : recallMemories(query, store, config, recallClient).then((r) => ({
+        ? recallMemoriesMultiScope(query, userStore, store, config, recallClient, recentTools)
+        : recallMemories(query, store, config, recallClient, recentTools).then((r) => ({
             ...r,
             userMemories: [],
             projectMemories: r.memories,
@@ -340,6 +343,12 @@ export const MemoryPlugin: Plugin = async (input) => {
         durationMs: 0,
       })
       sessionToolEvents.set(sid, events)
+
+      // Track recent tool names for transient memory filtering
+      const tools = sessionRecentTools.get(sid) ?? []
+      tools.push(toolInput.tool)
+      if (tools.length > MAX_RECENT_TOOLS) tools.shift()
+      sessionRecentTools.set(sid, tools)
     },
 
     // -----------------------------------------------------------------------
