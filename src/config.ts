@@ -251,6 +251,29 @@ export interface MemoryPluginConfig {
     /** Minimum level: debug | info | warn | error. */
     level: string
   }
+
+  /** Memory pressure thresholds for 3-level health detection */
+  memoryPressure: {
+    maxFiles: number
+    maxIndexSize: number
+    maxTotalSize: number
+    elevatedRatio: number
+    criticalRatio: number
+  }
+
+  /** Telemetry structured event logging */
+  telemetry: {
+    enabled: boolean
+    retentionDays: number
+    maxFileBytes: number
+  }
+
+  /** Per-stage agent/model configuration */
+  agents: {
+    extraction: { agent?: string; model?: string; category?: string }
+    dream: { agent?: string; model?: string; category?: string }
+    recall: { agent?: string; model?: string; category?: string }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +352,26 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
     file: true,
     level: "debug",
   },
+
+  memoryPressure: {
+    maxFiles: 500,
+    maxIndexSize: 25_000,
+    maxTotalSize: 5_242_880,
+    elevatedRatio: 0.7,
+    criticalRatio: 0.9,
+  },
+
+  telemetry: {
+    enabled: true,
+    retentionDays: 30,
+    maxFileBytes: 10_485_760,
+  },
+
+  agents: {
+    extraction: { category: "quick" },
+    dream: { category: "deep" },
+    recall: { agent: "explore" },
+  },
 }
 
 /** Merge user-provided options with defaults. */
@@ -347,6 +390,13 @@ export function resolveConfig(
       scan: { ...DEFAULT_CONFIG.scan },
       models: { ...DEFAULT_CONFIG.models },
       scope: { ...DEFAULT_CONFIG.scope },
+      memoryPressure: { ...DEFAULT_CONFIG.memoryPressure },
+      telemetry: { ...DEFAULT_CONFIG.telemetry },
+      agents: {
+        extraction: { ...DEFAULT_CONFIG.agents.extraction },
+        dream: { ...DEFAULT_CONFIG.agents.dream },
+        recall: { ...DEFAULT_CONFIG.agents.recall },
+      },
     }
   }
   return {
@@ -360,6 +410,13 @@ export function resolveConfig(
     scan: { ...DEFAULT_CONFIG.scan, ...overrides.scan },
     models: { ...DEFAULT_CONFIG.models, ...overrides.models },
     scope: { ...DEFAULT_CONFIG.scope, ...overrides.scope },
+    memoryPressure: { ...DEFAULT_CONFIG.memoryPressure, ...overrides.memoryPressure },
+    telemetry: { ...DEFAULT_CONFIG.telemetry, ...overrides.telemetry },
+    agents: {
+      extraction: { ...DEFAULT_CONFIG.agents.extraction, ...overrides.agents?.extraction },
+      dream: { ...DEFAULT_CONFIG.agents.dream, ...overrides.agents?.dream },
+      recall: { ...DEFAULT_CONFIG.agents.recall, ...overrides.agents?.recall },
+    },
   }
 }
 
@@ -428,6 +485,23 @@ interface ConfigFile {
     console?: boolean
     file?: boolean
     level?: string
+  }
+  memoryPressure?: {
+    max_files?: number
+    max_index_size?: number
+    max_total_size?: number
+    elevated_ratio?: number
+    critical_ratio?: number
+  }
+  telemetry?: {
+    enabled?: boolean
+    retention_days?: number
+    max_file_bytes?: number
+  }
+  agents?: {
+    extraction?: { agent?: string; model?: string; category?: string }
+    dream?: { agent?: string; model?: string; category?: string }
+    recall?: { agent?: string; model?: string; category?: string }
   }
 }
 
@@ -512,6 +586,38 @@ export async function loadConfig(
         console: file.logging?.console ?? DEFAULT_CONFIG.logging.console,
         file: file.logging?.file ?? DEFAULT_CONFIG.logging.file,
         level: file.logging?.level ?? DEFAULT_CONFIG.logging.level,
+      },
+
+      memoryPressure: {
+        maxFiles: file.memoryPressure?.max_files ?? DEFAULT_CONFIG.memoryPressure.maxFiles,
+        maxIndexSize: file.memoryPressure?.max_index_size ?? DEFAULT_CONFIG.memoryPressure.maxIndexSize,
+        maxTotalSize: file.memoryPressure?.max_total_size ?? DEFAULT_CONFIG.memoryPressure.maxTotalSize,
+        elevatedRatio: file.memoryPressure?.elevated_ratio ?? DEFAULT_CONFIG.memoryPressure.elevatedRatio,
+        criticalRatio: file.memoryPressure?.critical_ratio ?? DEFAULT_CONFIG.memoryPressure.criticalRatio,
+      },
+
+      telemetry: {
+        enabled: file.telemetry?.enabled ?? DEFAULT_CONFIG.telemetry.enabled,
+        retentionDays: file.telemetry?.retention_days ?? DEFAULT_CONFIG.telemetry.retentionDays,
+        maxFileBytes: file.telemetry?.max_file_bytes ?? DEFAULT_CONFIG.telemetry.maxFileBytes,
+      },
+
+      agents: {
+        extraction: {
+          agent: file.agents?.extraction?.agent,
+          model: file.agents?.extraction?.model,
+          category: file.agents?.extraction?.category ?? DEFAULT_CONFIG.agents.extraction.category,
+        },
+        dream: {
+          agent: file.agents?.dream?.agent,
+          model: file.agents?.dream?.model,
+          category: file.agents?.dream?.category ?? DEFAULT_CONFIG.agents.dream.category,
+        },
+        recall: {
+          agent: file.agents?.recall?.agent ?? file.features?.recall?.agent ?? DEFAULT_CONFIG.agents.recall.agent,
+          model: file.agents?.recall?.model,
+          category: file.agents?.recall?.category,
+        },
       },
     }
   } catch {
