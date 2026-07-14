@@ -33,6 +33,7 @@ import { parseFrontmatter } from "./store.js"
 import { scanMemoryFiles, formatManifest } from "./scan.js"
 import { acquireLock, releaseLock, getLockMtime, isLockHeld } from "./lock.js"
 import { promoteStaging } from "./promotion.js"
+import { checkMemoryPressure } from "./health.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -102,30 +103,51 @@ export async function shouldRunDream(
   const lockMtime = await getLockMtime(lockPath)
   const hoursSinceLast = (Date.now() - lockMtime) / MS_PER_HOUR
   const requiredHours = mode === "production" ? 168 : config.dream.minHoursSinceLast
-  const timeGatePassed = hoursSinceLast >= requiredHours
+  // --- Gate 2: Memory pressure (multi-level) ---
+  let pressureLevel: "normal" | "elevated" | "critical" = "normal"
+  try {
+    const pressure = await checkMemoryPressure(store, config)
+    pressureLevel = pressure.level
 
-  // --- Gate 2: Memory pressure OR sessions (medium — list + filter) ---
-  const memories = await store.list()
-  const memoryCount = memories.length
-  const memoryPressureTriggered = memoryCount > config.dream.memoryPressure
+    // Update state.json with pressure report (non-blocking)
+    if (statePath) {
+      void updateState(statePath, (s) => {
+        s.memory_pressure = {
+          level: pressure.level,
+          files: pressure.fileCount,
+          index_size: pressure.indexSize,
+          total_size: pressure.totalSize,
+          last_check: pressure.lastCheck,
+        }
+      }).catch(() => {})
+    }
+  } catch {
+    // Pressure check failed — fall back to simple threshold
+    const memoryCount = (await store.list()).length
+    if (memoryCount > config.dream.memoryPressure) {
+      pressureLevel = "critical"
+    }
+  }
 
-  // Index size check
-  const index = await store.getIndex()
-  const indexSize = index ? Buffer.byteLength(index, "utf-8") : 0
-  const indexSizeOverLimit = indexSize > config.entrypoint.maxBytes
-
-  // Memory pressure overrides time and session gates
-  if (memoryPressureTriggered || indexSizeOverLimit) {
+  // Critical pressure: bypass time gate, trigger directly
+  if (pressureLevel === "critical") {
     const held = await isLockHeld(lockPath, config.dream.lockStaleTimeoutMs)
     return !held
   }
 
-  // If time gate didn't pass and no memory pressure, don't run
+  // Elevated pressure: reduce time gate requirement by half
+  const effectiveRequiredHours = pressureLevel === "elevated"
+    ? requiredHours / 2
+    : requiredHours
+  const timeGatePassed = hoursSinceLast >= effectiveRequiredHours
+
+  // If time gate didn't pass and no critical pressure, don't run
   if (!timeGatePassed) {
     return false
   }
 
   // Session gate (normal mode only)
+  const memories = await store.list()
   if (mode === "normal") {
     const recentCount = memories.filter((m) => m.mtimeMs > lockMtime).length
     if (recentCount < config.dream.minSessionsSinceLast) {
