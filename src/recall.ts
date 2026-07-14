@@ -16,6 +16,7 @@ import type { MemoryHeader, MemoryPluginConfig, AgentSessionCreateOptions } from
 import type { MemoryStore } from "./store.js";
 import { scanMemoryFiles, formatManifest } from "./scan.js";
 import { memoryAgeDays } from "./staleness.js";
+import { checkMemoryPressure } from "./health.js";
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -379,6 +380,24 @@ export async function recallMemories(
 
   // Build manifest for the LLM
   const manifest = formatManifest(candidateHeaders);
+
+  // Pressure-aware LLM rerank: skip on critical pressure
+  let skipRerank: boolean = config.recall.llmRerankDisabled;
+  try {
+    const pressure = await checkMemoryPressure(store, config);
+    if (pressure.level === "critical") skipRerank = true as boolean;
+  } catch { /* pressure check failed — keep existing skipRerank */ }
+
+  if (skipRerank) {
+    const selected = candidateHeaders.slice(0, config.recall.maxResults);
+    const memories = await buildResultFromHeaders(selected, store);
+    return {
+      memories,
+      stage1Count,
+      stage2Count: memories.length,
+      llmUsed: false,
+    };
+  }
 
   // Create session for the rerank call
   let sessionId: string;
