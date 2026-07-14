@@ -1,5 +1,5 @@
 {
-  "$comment": "opencode-memory plugin configuration. Edit this file to tune models, thresholds, and feature scheduling.",
+  "$comment": "opencode-memory plugin configuration. Copy this file to memory.config.json and edit as needed.",
 
   "enabled": true,
   "storage": "filesystem",
@@ -33,6 +33,7 @@
       "category": "deep",
       "min_hours_since_last": 24,
       "min_sessions_since_last": 5,
+      "min_messages_since_last": 10,
       "lock_stale_timeout_ms": 3600000
     },
 

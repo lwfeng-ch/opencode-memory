@@ -44,3 +44,8 @@ undefined/
 
 # Local agent instructions (session-specific, not project source)
 AGENTS.md
+
+# Private / local-only artifacts (not for GitHub)
+docs/
+qwen-code-main/
+memory.config.json
