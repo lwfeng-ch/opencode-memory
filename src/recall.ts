@@ -88,14 +88,18 @@ const DURABLE_TOOL_MARKERS = [
 ];
 
 /** Check if a memory is a transient tool-debug memory that should be filtered. */
-function isTransientToolMemory(header: MemoryHeader, recentTools: string[]): boolean {
+export function isTransientToolMemory(header: MemoryHeader, recentTools: string[]): boolean {
   if (recentTools.length === 0) return false
-  const haystack = [header.description ?? "", header.filename].join(" ").toLowerCase()
-  const namesActiveTool = recentTools.some((tool) => haystack.includes(tool.toLowerCase()))
+  const descLower = (header.description ?? "").toLowerCase()
+  const filenameLower = header.filename.toLowerCase()
+  // Tool name match: check both description and filename
+  const namesActiveTool = recentTools.some((tool) =>
+    descLower.includes(tool.toLowerCase()) || filenameLower.includes(tool.toLowerCase()))
   if (!namesActiveTool) return false
-  const hasTransient = TRANSIENT_TOOL_MARKERS.some((m) => haystack.includes(m))
+  // Markers: check DESCRIPTION ONLY (filename substrings like "note" cause false positives)
+  const hasTransient = TRANSIENT_TOOL_MARKERS.some((m) => descLower.includes(m))
   if (!hasTransient) return false
-  const hasDurable = DURABLE_TOOL_MARKERS.some((m) => haystack.includes(m))
+  const hasDurable = DURABLE_TOOL_MARKERS.some((m) => descLower.includes(m))
   return !hasDurable
 }
 
