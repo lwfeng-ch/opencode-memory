@@ -4,30 +4,39 @@
 
 面向 [OpenCode](https://opencode.ai) 的流水线化、模型无关的长期记忆系统。
 
-借鉴 Claude Code 的记忆流水线设计，基于 OpenCode 事件驱动的插件架构重新构建。免费模型优先：每个 LLM 调用点均可独立配置，支持优雅降级。
+借鉴 Claude Code 的记忆流水线设计和 Qwen Code 的 Fact Layer 架构，基于 OpenCode 事件驱动的插件架构重新构建。免费模型优先：每个 LLM 调用点均可独立配置，支持优雅降级。
 
 ## 特性
 
 - **KAIROS 模式** — 活跃会话期间追加式日志（零 LLM 开销），`session.idle` 时批量提取
+- **增量提取** — 基于 Cursor 的消息偏移追踪；仅将上次提取后的新消息发送给 LLM（降低长会话成本）
 - **两阶段召回** — 规则筛选（免费，零模型调用）+ LLM 精排（仅对候选集发一次轻量调用）
-- **Dream 蒸馏** — 四阶段流水线：定向 → 收集 → 合并 → 清理，三重门控调度，周期运行
+- **RecallHandle** — 异步召回在 `chat.message` 时启动，后台结算，在下一轮 `system.transform` 时注入——不阻塞、不丢结果
+- **活动工具过滤** — 工具活跃时的临时调试记忆（如 "npm install failed"）被过滤；持久标记（"workaround"、"known issue"）保留
+- **记忆压力检测** — 三级检测（normal/elevated/critical），基于文件数、索引大小和总大小；critical 绕过 Dream 时间门控，elevated 减半
+- **Dream 蒸馏** — 四阶段流水线：定向 → 收集 → 合并 → 清理，三重门控调度 + 压力感知触发
+- **条目级删除** — `memory_delete` 支持 `entryId` 参数，可删除多条目记忆文件中的单条记录，而非整文件
+- **遥测事件** — 结构化 JSONL 事件日志（`logEvent`/`queryEvents`/`cleanupOldEvents`），覆盖提取、召回、Dream 生命周期——永不阻塞流水线
 - **跨项目分层** — 用户级记忆（全局偏好）+ 项目级记忆（仓库上下文），支持优先级覆盖
-- **6 个自定义工具** — `memory_save`、`memory_list`、`memory_search`、`memory_read`、`memory_delete`、`memory_append`
+- **6 个自定义工具** — `memory_save`、`memory_list`、`memory_search`、`memory_read`、`memory_delete`（支持条目级）、`memory_append`
 - **时效感知** — 超过 N 天的记忆自动注入"时间点观察"警示标记
-- **模型无关** — 免费模型默认配置（`explore`/`quick`/`deep` 类别），每个阶段独立可配
+- **模型无关** — 免费模型默认配置（`explore`/`quick`/`deep` 类别），每个阶段独立可配，`resolveAgentConfig` 安全检查
 
 ## 架构
 
 ```
 src/
 ├── index.ts        插件入口 — 串联 hooks（system.transform, chat.message, event, tool）
-├── config.ts       配置、类型分类（user/feedback/project/reference）、scope 路由
-├── store.ts        存储抽象（FileSystemStore）、frontmatter 解析器
-├── paths.ts        路径解析（项目 + 用户记忆目录、git 根检测）
+├── config.ts       配置、类型分类、scope 路由、resolveAgentConfig
+├── store.ts        存储抽象（FileSystemStore）、frontmatter 解析、parseEntries/deleteEntry
+├── paths.ts        路径解析（项目 + 用户目录、git 根、cursor 路径）
 ├── prompt.ts       系统提示词构建（指令 + MEMORY.md 索引注入）
-├── recall.ts       两阶段召回：规则筛选 → LLM 精排，多 scope 支持
-├── extraction.ts   KAIROS 会话提取（session.idle 触发）
-├── dream.ts        Dream 蒸馏：四阶段流水线 + 三重门控调度
+├── recall.ts       两阶段召回：规则筛选 → LLM 精排、RecallHandle、isTransientToolMemory、压力缓存
+├── extraction.ts   KAIROS 会话提取（session.idle）、cursor 增量处理
+├── dream.ts        Dream 蒸馏：四阶段流水线 + 三重门控 + 压力感知触发
+├── cursor.ts       增量提取追踪（readCursor/writeCursor）
+├── health.ts       记忆压力检测（三级）、健康评分、状态报告
+├── telemetry.ts    结构化 JSONL 事件日志（logEvent/queryEvents/cleanupOldEvents）
 ├── scan.ts         目录扫描 + 清单/选择格式化
 ├── staleness.ts    时效计算 + 新鲜度警示（纯函数，无 I/O）
 ├── lock.ts         文件锁互斥（PID + 超时）
@@ -40,20 +49,22 @@ src/
 用户消息
     │
     ▼
-chat.message hook ──► 召回（异步，非阻塞）
+chat.message hook ──► 召回（异步，RecallHandle）
     │                     │
-    │              阶段一：规则筛选（免费）
-    │              阶段二：LLM 精排（一次调用）
+    │              阶段一：规则筛选（免费）+ 临时工具过滤
+    │              阶段二：LLM 精排（一次调用）— critical 压力时跳过
     │                     │
     ▼                     ▼
-system.transform hook ──► 注入 MEMORY.md 索引 + 召回的记忆
+system.transform hook ──► 注入 MEMORY.md 索引 + 召回记忆（来自 RecallHandle）
     │
     ▼
 Agent 运行（带记忆上下文）
     │
     ▼
-session.idle 事件 ──► 提取（批量，KAIROS）
-                   └──► Dream 蒸馏（门控通过时）
+session.idle 事件 ──► 提取（批量，KAIROS，cursor 增量）
+                   └──► Dream 蒸馏（门控通过 + 压力感知）
+                             │
+                             └──► 遥测事件（JSONL，非阻塞）
 ```
 
 ### 记忆类型
@@ -94,14 +105,18 @@ type 与 scope 松绑定 — Agent 可通过 `memory_save` 的 `scope` 参数覆
 
 ## 配置
 
-编辑 `memory.config.json` 调整模型、阈值和功能开关：
+将 `memory.config.example.json` 复制为 `memory.config.json` 后按需编辑：
+
+```bash
+cp memory.config.example.json memory.config.json
+```
 
 ```jsonc
 {
   "enabled": true,
   "features": {
     "recall": {
-      "enabled": true,           // 启用/禁用召回流水线
+      "enabled": true,
       "agent": "explore",        // LLM 精排使用的子 Agent 类型
       "background": true,        // 异步预取（非阻塞）
       "llm_rerank": true,        // 设为 false 则仅用规则筛选（最弱模型模式）
@@ -113,13 +128,20 @@ type 与 scope 松绑定 — Agent 可通过 `memory_save` 的 `scope` 参数覆
       "enabled": true,
       "category": "quick",       // 提取子 Agent 类别
       "min_tokens_to_init": 10000,
-      "min_tokens_between_update": 5000
+      "min_tokens_between_update": 5000,
+      "max_section_length": 2000,
+      "max_total_tokens": 12000
     },
     "dream": {
       "enabled": true,
       "category": "deep",        // Dream 子 Agent 类别
       "min_hours_since_last": 24,
-      "min_sessions_since_last": 5
+      "min_sessions_since_last": 5,
+      "min_messages_since_last": 10,
+      "lock_stale_timeout_ms": 3600000
+    },
+    "staleness": {
+      "warn_after_days": 1
     },
     "scope": {
       "user_scope_enabled": true,       // 跨项目用户记忆
@@ -127,9 +149,26 @@ type 与 scope 松绑定 — Agent 可通过 `memory_save` 的 `scope` 参数覆
     }
   },
   "models": {
-    "recall": null,     // null = 使用 Agent 默认值；或设为 "opencode/north-mini-code-free"
+    "recall": null,       // null = 使用 Agent 默认值；或设为 "opencode/north-mini-code-free"
     "extraction": null,
     "dream": null
+  },
+  "memoryPressure": {
+    "maxFiles": 500,         // 文件数阈值
+    "maxIndexSize": 25000,   // MEMORY.md 字节上限
+    "maxTotalSize": 5242880, // 记忆目录总大小（估算）
+    "elevatedRatio": 0.7,    // ≥70% → elevated
+    "criticalRatio": 0.9     // ≥90% → critical
+  },
+  "telemetry": {
+    "enabled": true,         // 设为 false 禁用所有事件日志
+    "maxAgeDays": 7,         // 自动清理 7 天前的事件
+    "maxEventsPerFile": 1000
+  },
+  "agents": {
+    "recall":     { "agent": "explore", "model": null },
+    "extraction": { "category": "quick", "model": null },
+    "dream":      { "category": "deep", "model": null }
   }
 }
 ```
@@ -159,24 +198,34 @@ schema_version: 1
 ## 测试
 
 ```bash
-# 运行全部验证测试
-bun run test/verify-all-fixes.ts   # 第一轮（22 项测试）
-bun run test/verify-round2.ts       # 第二轮（24 项测试）
+# 运行全部单元 + 集成测试（139 项，18 个文件）
+bun test test/chain.test.ts test/config-pressure.test.ts test/cursor.test.ts \
+     test/entry-delete.test.ts test/health-pressure.test.ts test/integration.test.ts \
+     test/lock-recall.test.ts test/lock.test.ts test/paths.test.ts test/prompt.test.ts \
+     test/resolve-agent.test.ts test/scan.test.ts test/state-pressure.test.ts \
+     test/staleness.test.ts test/telemetry.test.ts test/tools.test.ts \
+     test/transient-filter.test.ts test/round10-integration.test.ts
 
-# 运行集成测试
-bun run test/integration.test.ts
-bun run test/scope-integration.ts
+# 运行单个测试套件
+bun test test/integration.test.ts              # Dream + Extraction + Plugin（12 项）
+bun test test/round10-integration.test.ts      # Cursor + Pressure + RecallHandle（14 项）
+bun test test/cursor.test.ts                   # Cursor 读写（6 项）
+bun test test/telemetry.test.ts                # 遥测日志（9 项）
+bun test test/health-pressure.test.ts          # 压力检测（6 项）
 ```
 
-共 46 项测试，全部通过。
+共 139 项测试，覆盖 18 个文件，全部通过。
 
 ## 设计原则
 
 1. **流水线优先，而非复刻** — 不是 Claude Code 的克隆，而是面向 OpenCode 架构的流水线化设计
 2. **免费模型优先** — 每个 LLM 阶段均可优雅降级；规则筛选在零模型调用下即可工作
-3. **松耦合** — `type` ≠ `scope`；type 是语义分类，scope 是生命周期边界，可逐条覆盖
-4. **协作而非竞争** — 主 Agent 主动写记忆；提取/Dream 是安全网，不抢占
-5. **纵深防御** — 工具层和存储层双重路径遍历保护
+3. **增量优于重处理** — Cursor 追踪消息偏移；重新提取时仅发送新消息给 LLM
+4. **压力感知调度** — Dream 蒸馏响应记忆压力（critical 立即触发，elevated 减半时间门控）
+5. **遥测永不阻塞** — 所有事件日志均为 fire-and-forget（`void logEvent`），失败静默
+6. **松耦合** — `type` ≠ `scope`；type 是语义分类，scope 是生命周期边界，可逐条覆盖
+7. **协作而非竞争** — 主 Agent 主动写记忆；提取/Dream 是安全网，不抢占
+8. **纵深防御** — 工具层和存储层双重路径遍历保护
 
 ## 记忆系统概念问答
 

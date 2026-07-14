@@ -4,30 +4,39 @@ English | [简体中文](README-zh.md)
 
 Pipeline-centered, model-agnostic long-term memory system for [OpenCode](https://opencode.ai).
 
-Inspired by Claude Code's memory pipeline, rebuilt for OpenCode's event-driven plugin architecture. Free-model first: every LLM call point is independently configurable with graceful degradation.
+Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architecture, rebuilt for OpenCode's event-driven plugin architecture. Free-model first: every LLM call point is independently configurable with graceful degradation.
 
 ## Features
 
 - **KAIROS Mode** — Append-only daily logs during active sessions (zero LLM cost), batch extraction on `session.idle`
+- **Incremental Extraction** — Cursor-based message offset tracking; only new messages since the last extraction run are sent to the LLM (reduces cost on long sessions)
 - **Two-Stage Recall** — Rule filter (free, zero model calls) + LLM rerank (one lightweight call on survivors only)
-- **Dream Consolidation** — 4-phase pipeline: Orient → Gather → Consolidate → Prune, runs periodically with 3-gate scheduling
+- **RecallHandle** — Async recall fires on `chat.message`, settles in background, injects on next `system.transform` turn — no blocking, no missed results
+- **Active Tool Filter** — Transient tool-debug memories (e.g. "npm install failed") are filtered from recall when the tool is active; durable markers ("workaround", "known issue") survive
+- **Memory Pressure** — 3-level detection (normal/elevated/critical) based on file count, index size, and total size; critical pressure bypasses dream time gate, elevated halves it
+- **Dream Consolidation** — 4-phase pipeline: Orient → Gather → Consolidate → Prune, runs periodically with 3-gate scheduling + pressure-aware triggering
+- **Entry-Level Deletion** — `memory_delete` supports `entryId` parameter for removing individual entries from multi-entry memory files, not just whole files
+- **Telemetry** — Structured JSONL event logging (`logEvent`/`queryEvents`/`cleanupOldEvents`) for extraction, recall, and dream lifecycle — never blocks the pipeline
 - **Cross-Project Scope** — User-level memories (global preferences) + project-level memories (per-repo context), with priority override
-- **6 Custom Tools** — `memory_save`, `memory_list`, `memory_search`, `memory_read`, `memory_delete`, `memory_append`
+- **6 Custom Tools** — `memory_save`, `memory_list`, `memory_search`, `memory_read`, `memory_delete` (with entry-level), `memory_append`
 - **Staleness Awareness** — Memories older than N days get point-in-time caveats injected into context
-- **Model-Agnostic** — Free-model defaults (`explore`/`quick`/`deep` categories), every stage independently configurable
+- **Model-Agnostic** — Free-model defaults (`explore`/`quick`/`deep` categories), every stage independently configurable with `resolveAgentConfig` safety check
 
 ## Architecture
 
 ```
 src/
 ├── index.ts        Plugin entry — wires hooks (system.transform, chat.message, event, tool)
-├── config.ts       Configuration, type taxonomy (user/feedback/project/reference), scope resolver
-├── store.ts        Storage abstraction (FileSystemStore), frontmatter parser
-├── paths.ts        Path resolution (project + user memory dirs, git root detection)
+├── config.ts       Configuration, type taxonomy, scope resolver, resolveAgentConfig
+├── store.ts        Storage abstraction (FileSystemStore), frontmatter parser, parseEntries/deleteEntry
+├── paths.ts        Path resolution (project + user dirs, git root, cursor paths)
 ├── prompt.ts       System prompt builder (instructions + MEMORY.md index injection)
-├── recall.ts       Two-stage recall: rule filter → LLM rerank, multi-scope support
-├── extraction.ts   KAIROS session extraction on session.idle
-├── dream.ts        Dream consolidation: 4-phase pipeline + 3-gate scheduling
+├── recall.ts       Two-stage recall: rule filter → LLM rerank, RecallHandle, isTransientToolMemory, pressure cache
+├── extraction.ts   KAIROS session extraction on session.idle, cursor-based incremental processing
+├── dream.ts        Dream consolidation: 4-phase pipeline + 3-gate scheduling + pressure-aware triggering
+├── cursor.ts       Incremental extraction tracking (readCursor/writeCursor)
+├── health.ts       Memory pressure detection (3-level), health score, status report
+├── telemetry.ts    Structured JSONL event logging (logEvent/queryEvents/cleanupOldEvents)
 ├── scan.ts         Directory scanning + manifest/selection formatting
 ├── staleness.ts    Age computation + freshness caveats (pure, no I/O)
 ├── lock.ts         File-based mutual exclusion (PID + stale timeout)
@@ -40,20 +49,22 @@ src/
 User Message
     │
     ▼
-chat.message hook ──► Recall (async, non-blocking)
+chat.message hook ──► Recall (async, RecallHandle)
     │                     │
-    │              Stage 1: Rule filter (free)
-    │              Stage 2: LLM rerank (one call)
+    │              Stage 1: Rule filter (free) + transient tool filter
+    │              Stage 2: LLM rerank (one call) — skipped on critical pressure
     │                     │
     ▼                     ▼
-system.transform hook ──► Inject MEMORY.md index + recalled memories
+system.transform hook ──► Inject MEMORY.md index + recalled memories (from RecallHandle)
     │
     ▼
 Agent runs (with memory context)
     │
     ▼
-session.idle event ──► Extraction (batch, KAIROS)
-                    └──► Dream consolidation (if gates pass)
+session.idle event ──► Extraction (batch, KAIROS, cursor-incremental)
+                    └──► Dream consolidation (if gates pass + pressure-aware)
+                              │
+                              └──► Telemetry events (JSONL, non-blocking)
 ```
 
 ### Memory Types
@@ -94,14 +105,18 @@ Or place the plugin directory under `~/.config/opencode/plugins/opencode-memory/
 
 ## Configuration
 
-Edit `memory.config.json` to tune models, thresholds, and features:
+Copy `memory.config.example.json` to `memory.config.json` and edit as needed:
+
+```bash
+cp memory.config.example.json memory.config.json
+```
 
 ```jsonc
 {
   "enabled": true,
   "features": {
     "recall": {
-      "enabled": true,           // Enable/disable recall pipeline
+      "enabled": true,
       "agent": "explore",        // Subagent type for LLM rerank
       "background": true,        // Async prefetch (non-blocking)
       "llm_rerank": true,        // Set false for rule-filter-only mode
@@ -113,23 +128,47 @@ Edit `memory.config.json` to tune models, thresholds, and features:
       "enabled": true,
       "category": "quick",       // Subagent category for extraction
       "min_tokens_to_init": 10000,
-      "min_tokens_between_update": 5000
+      "min_tokens_between_update": 5000,
+      "max_section_length": 2000,
+      "max_total_tokens": 12000
     },
     "dream": {
       "enabled": true,
       "category": "deep",        // Subagent category for dream
       "min_hours_since_last": 24,
-      "min_sessions_since_last": 5
+      "min_sessions_since_last": 5,
+      "min_messages_since_last": 10,
+      "lock_stale_timeout_ms": 3600000
+    },
+    "staleness": {
+      "warn_after_days": 1
     },
     "scope": {
-      "user_scope_enabled": true,       // Cross-project user memory
-      "project_overrides_user": true     // Project wins on conflict
+      "user_scope_enabled": true,
+      "project_overrides_user": true
     }
   },
   "models": {
-    "recall": null,     // null = use agent default; or set e.g. "opencode/north-mini-code-free"
+    "recall": null,       // null = use agent default; or set e.g. "opencode/north-mini-code-free"
     "extraction": null,
     "dream": null
+  },
+  "memoryPressure": {
+    "maxFiles": 500,         // File count threshold
+    "maxIndexSize": 25000,   // MEMORY.md byte limit
+    "maxTotalSize": 5242880, // Total memory dir size (estimated)
+    "elevatedRatio": 0.7,    // ≥70% → elevated
+    "criticalRatio": 0.9     // ≥90% → critical
+  },
+  "telemetry": {
+    "enabled": true,         // Set false to disable all event logging
+    "maxAgeDays": 7,         // Auto-cleanup events older than 7 days
+    "maxEventsPerFile": 1000
+  },
+  "agents": {
+    "recall":   { "agent": "explore", "model": null },
+    "extraction": { "category": "quick", "model": null },
+    "dream":    { "category": "deep", "model": null }
   }
 }
 ```
@@ -159,24 +198,34 @@ Memory body content...
 ## Testing
 
 ```bash
-# Run all verification tests
-bun run test/verify-all-fixes.ts   # Round 1 (22 tests)
-bun run test/verify-round2.ts       # Round 2 (24 tests)
+# Run all unit + integration tests (139 tests, 18 files)
+bun test test/chain.test.ts test/config-pressure.test.ts test/cursor.test.ts \
+     test/entry-delete.test.ts test/health-pressure.test.ts test/integration.test.ts \
+     test/lock-recall.test.ts test/lock.test.ts test/paths.test.ts test/prompt.test.ts \
+     test/resolve-agent.test.ts test/scan.test.ts test/state-pressure.test.ts \
+     test/staleness.test.ts test/telemetry.test.ts test/tools.test.ts \
+     test/transient-filter.test.ts test/round10-integration.test.ts
 
-# Run integration tests
-bun run test/integration.test.ts
-bun run test/scope-integration.ts
+# Run individual suites
+bun test test/integration.test.ts              # Dream + Extraction + Plugin (12 tests)
+bun test test/round10-integration.test.ts      # Cursor + Pressure + RecallHandle (14 tests)
+bun test test/cursor.test.ts                   # Cursor read/write (6 tests)
+bun test test/telemetry.test.ts                # Telemetry logging (9 tests)
+bun test test/health-pressure.test.ts          # Pressure detection (6 tests)
 ```
 
-46 tests total, all passing.
+139 tests total across 18 files, all passing.
 
 ## Design Principles
 
 1. **Pipeline over replication** — Not a Claude Code clone; a pipeline-first design adapted to OpenCode's architecture
 2. **Free-model first** — Every LLM stage degrades gracefully; rule filter works with zero model calls
-3. **Loose coupling** — `type` ≠ `scope`; type is semantic, scope is lifecycle, overridable per-memory
-4. **Cooperative, not competitive** — Main agent writes memories proactively; extraction/dream are safety nets
-5. **Defense in depth** — Path traversal protection at both tool layer and store layer
+3. **Incremental over reprocess** — Cursor tracks message offset; only new messages are sent to the LLM on re-extraction
+4. **Pressure-aware scheduling** — Dream consolidation responds to memory pressure (critical triggers immediately, elevated halves time gate)
+5. **Telemetry never blocks** — All event logging is fire-and-forget (`void logEvent`); failures are silent
+6. **Loose coupling** — `type` ≠ `scope`; type is semantic, scope is lifecycle, overridable per-memory
+7. **Cooperative, not competitive** — Main agent writes memories proactively; extraction/dream are safety nets
+8. **Defense in depth** — Path traversal protection at both tool layer and store layer
 
 ## Memory System Conceptual Q&A
 
