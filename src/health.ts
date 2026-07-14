@@ -16,6 +16,8 @@
  */
 
 import type { PipelineState } from "./state.js"
+import type { MemoryStore } from "./store.js"
+import type { MemoryPluginConfig } from "./config.js"
 
 // ---------------------------------------------------------------------------
 // Mode-based activity windows (milliseconds)
@@ -283,4 +285,75 @@ function formatFailure(failureAt: string | null, lastError: string | null): stri
 /** Boolean → "working" / "failed" label. */
 function boolLabel(value: boolean): string {
   return value ? "working" : "failed"
+}
+
+// ---------------------------------------------------------------------------
+// Memory pressure detection (3-level)
+// ---------------------------------------------------------------------------
+
+export type PressureLevel = "normal" | "elevated" | "critical"
+
+export interface MemoryPressureReport {
+  level: PressureLevel
+  fileCount: number
+  indexSize: number
+  totalSize: number
+  lastCheck: string
+}
+
+/**
+ * Detect current memory pressure level.
+ *
+ * Three signals (strongest wins):
+ *   1. fileCount / maxFiles
+ *   2. indexSize / maxIndexSize
+ *   3. totalSize / maxTotalSize (estimated by sampling)
+ *
+ * Levels:
+ *   normal   — all ratios < elevatedRatio (0.7)
+ *   elevated — any ratio >= elevatedRatio but < criticalRatio
+ *   critical — any ratio >= criticalRatio (0.9)
+ *
+ * Pure computation + I/O (store.list, store.read, store.getIndex).
+ * Zero LLM calls.
+ */
+export async function checkMemoryPressure(
+  store: MemoryStore,
+  config: MemoryPluginConfig,
+): Promise<MemoryPressureReport> {
+  const memories = await store.list()
+  const index = await store.getIndex()
+  const indexSize = index ? Buffer.byteLength(index, "utf-8") : 0
+
+  // Estimate total size by sampling first 50 files
+  let sampledSize = 0
+  const sampleCount = Math.min(50, memories.length)
+  for (const m of memories.slice(0, sampleCount)) {
+    try {
+      const content = await store.read(m.filename)
+      sampledSize += Buffer.byteLength(content, "utf-8")
+    } catch {
+      // skip unreadable files
+    }
+  }
+  const avgSize = sampleCount > 0 ? sampledSize / sampleCount : 0
+  const totalSize = Math.round(avgSize * memories.length)
+
+  const { maxFiles, maxIndexSize, maxTotalSize, elevatedRatio, criticalRatio } = config.memoryPressure
+  const fileRatio = memories.length / maxFiles
+  const indexRatio = indexSize / maxIndexSize
+  const totalRatio = totalSize / maxTotalSize
+  const maxRatio = Math.max(fileRatio, indexRatio, totalRatio)
+
+  let level: PressureLevel = "normal"
+  if (maxRatio >= criticalRatio) level = "critical"
+  else if (maxRatio >= elevatedRatio) level = "elevated"
+
+  return {
+    level,
+    fileCount: memories.length,
+    indexSize,
+    totalSize,
+    lastCheck: new Date().toISOString(),
+  }
 }
