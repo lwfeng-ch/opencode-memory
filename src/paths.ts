@@ -119,3 +119,18 @@ export function getFactSessionPath(memoryDir: string, sessionId: string, date?: 
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return join(memoryDir, 'fact', 'sessions', yyyy, mm, `session_${sessionId}.json`);
 }
+
+/** Fact 根目录：<memoryDir>/fact/（注意：getFactDir 返回 fact/sessions/，不是 fact/） */
+export function getFactRootDir(memoryDir: string): string {
+  return join(memoryDir, 'fact');
+}
+
+/** 游标目录：<memoryDir>/fact/cursor/ */
+export function getCursorDir(memoryDir: string): string {
+  return join(getFactRootDir(memoryDir), 'cursor');
+}
+
+/** 游标文件路径：<memoryDir>/fact/cursor/extraction-cursor.json */
+export function getCursorPath(memoryDir: string): string {
+  return join(getCursorDir(memoryDir), 'extraction-cursor.json');
+}
