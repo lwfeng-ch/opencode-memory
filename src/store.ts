@@ -215,3 +215,64 @@ export async function createStore(
     options?.frontmatterMaxLines ?? 30,
   )
 }
+
+// ---------------------------------------------------------------------------
+// Entry-level operations (for multi-entry memory files)
+// ---------------------------------------------------------------------------
+
+/** Parse entries from a memory file body. Returns [] if no entry markers. */
+export function parseEntries(content: string): Array<{ id: number; body: string }> {
+  const fmMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  const body = fmMatch ? content.slice(fmMatch[0].length) : content
+  const entries: Array<{ id: number; body: string }> = []
+  const regex = /<!--\s*entry:id=(\d+)\s*-->\r?\n([\s\S]*?)(?=<!--\s*entry:id=|$)/g
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(body)) !== null) {
+    entries.push({ id: parseInt(match[1], 10), body: match[2].trim() })
+  }
+  return entries
+}
+
+/** Extract frontmatter string from content. */
+function extractFrontmatter(content: string): string {
+  const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  return match ? match[0] : ""
+}
+
+/** Rebuild file: frontmatter + entries with markers. */
+function rebuildFile(
+  frontmatter: string,
+  entries: Array<{ id: number; body: string }>,
+): string {
+  const body = entries
+    .map((e) => `<!-- entry:id=${e.id} -->\n${e.body}`)
+    .join("\n\n")
+  return `${frontmatter}\n${body}\n`
+}
+
+/** Delete a specific entry from a memory file. Falls back to file delete if no markers. */
+export async function deleteEntry(
+  store: MemoryStore,
+  filename: string,
+  entryId: number,
+): Promise<{ deletedFile: boolean; remainingEntries: number }> {
+  const content = await store.read(filename)
+  const frontmatter = extractFrontmatter(content)
+  const entries = parseEntries(content)
+
+  if (entries.length === 0) {
+    await store.delete(filename)
+    return { deletedFile: true, remainingEntries: 0 }
+  }
+
+  const filtered = entries.filter((e) => e.id !== entryId)
+  if (filtered.length === 0) {
+    await store.delete(filename)
+    return { deletedFile: true, remainingEntries: 0 }
+  }
+  if (filtered.length === entries.length) {
+    throw new Error(`Entry id=${entryId} not found in ${filename}`)
+  }
+  await store.write(filename, rebuildFile(frontmatter, filtered))
+  return { deletedFile: false, remainingEntries: filtered.length }
+}

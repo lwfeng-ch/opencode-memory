@@ -360,13 +360,17 @@ export function defineMemoryTools(
     // -----------------------------------------------------------------------
     memory_delete: {
       description: [
-        "Delete a memory file and remove its entry from the MEMORY.md index.",
+        "Delete a memory file or a specific entry within it.",
         "",
-        "Use this when a memory is outdated, wrong, or no longer relevant.",
-        "Also removes it from the index so it won't appear in listings.",
+        "If `entryId` is provided, deletes only the specified entry (the file",
+        "is kept with remaining entries). If the file has only one entry or no",
+        "entry markers, the entire file is deleted.",
+        "",
+        "If `entryId` is omitted, deletes the entire file.",
       ].join("\n"),
       args: {
         filename: z.string().describe("File name of the memory to delete (with or without .md extension)."),
+        entryId: z.number().optional().describe("Optional entry ID to delete. If omitted, deletes the entire file."),
       },
       execute: async (args) => {
         let filename = String(args.filename ?? "")
@@ -377,39 +381,52 @@ export function defineMemoryTools(
           filename += ".md"
         }
 
-        // Try projectStore first
+        const entryId = args.entryId as number | undefined
+
+        // Determine target store
+        let targetStore: MemoryStore | undefined
+        let scopeLabel: string
         if (await projectStore.exists(filename)) {
-          await projectStore.delete(filename)
-
-          // Remove from project index
-          const indexRaw = await projectStore.getIndex()
-          const lines = parseIndex(indexRaw)
-          const existingIdx = findIndexLine(lines, filename)
-          if (existingIdx >= 0) {
-            lines.splice(existingIdx, 1)
-            await projectStore.updateIndex(formatIndex(lines))
-          }
-
-          return { output: `Deleted: ${filename} from project scope` }
+          targetStore = projectStore
+          scopeLabel = "project"
+        } else if (userStore && await userStore.exists(filename)) {
+          targetStore = userStore
+          scopeLabel = "user"
+        } else {
+          return { output: `Error: memory "${filename}" not found.` }
         }
 
-        // Try userStore as fallback
-        if (userStore && await userStore.exists(filename)) {
-          await userStore.delete(filename)
-
-          // Remove from user index
-          const indexRaw = await userStore.getIndex()
-          const lines = parseIndex(indexRaw)
-          const existingIdx = findIndexLine(lines, filename)
-          if (existingIdx >= 0) {
-            lines.splice(existingIdx, 1)
-            await userStore.updateIndex(formatIndex(lines))
+        if (entryId !== undefined) {
+          // Entry-level deletion
+          try {
+            const { deleteEntry } = await import("./store.js")
+            const result = await deleteEntry(targetStore, filename, entryId)
+            if (result.deletedFile) {
+              const indexRaw = await targetStore.getIndex()
+              const lines = parseIndex(indexRaw)
+              const existingIdx = findIndexLine(lines, filename)
+              if (existingIdx >= 0) {
+                lines.splice(existingIdx, 1)
+                await targetStore.updateIndex(formatIndex(lines))
+              }
+              return { output: `Deleted entry ${entryId} (file removed: no remaining entries) [${scopeLabel}]` }
+            }
+            return { output: `Deleted entry ${entryId} from ${filename} (${result.remainingEntries} entries remaining) [${scopeLabel}]` }
+          } catch (err) {
+            return { output: `Error: ${err instanceof Error ? err.message : String(err)}` }
           }
-
-          return { output: `Deleted: ${filename} from user scope` }
         }
 
-        return { output: `Error: memory "${filename}" not found.` }
+        // File-level deletion (existing logic)
+        await targetStore.delete(filename)
+        const indexRaw = await targetStore.getIndex()
+        const lines = parseIndex(indexRaw)
+        const existingIdx = findIndexLine(lines, filename)
+        if (existingIdx >= 0) {
+          lines.splice(existingIdx, 1)
+          await targetStore.updateIndex(formatIndex(lines))
+        }
+        return { output: `Deleted: ${filename} [${scopeLabel}]` }
       },
     },
 
