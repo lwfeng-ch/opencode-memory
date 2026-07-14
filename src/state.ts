@@ -53,6 +53,13 @@ export interface PipelineState {
     llm_rerank_failed: number
   }
   events_received: Record<string, { total: number; last_received_at: string | null }>
+  memory_pressure: {
+    level: "normal" | "elevated" | "critical"
+    files: number
+    index_size: number
+    total_size: number
+    last_check: string
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +103,13 @@ export const DEFAULT_STATE: PipelineState = {
     llm_rerank_failed: 0,
   },
   events_received: {},
+  memory_pressure: {
+    level: "normal" as const,
+    files: 0,
+    index_size: 0,
+    total_size: 0,
+    last_check: "",
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +118,7 @@ export const DEFAULT_STATE: PipelineState = {
 
 /** Merge a parsed (possibly partial) state with DEFAULT_STATE so that
  *  new fields added in future versions don't break old state.json files. */
-function mergeState(parsed: Partial<PipelineState>): PipelineState {
+export function mergeState(parsed: Partial<PipelineState>): PipelineState {
   const d = DEFAULT_STATE
   return {
     version: parsed.version ?? d.version,
@@ -116,6 +130,7 @@ function mergeState(parsed: Partial<PipelineState>): PipelineState {
     dream: { ...d.dream, ...parsed.dream },
     recall: { ...d.recall, ...parsed.recall },
     events_received: parsed.events_received ?? d.events_received,
+    memory_pressure: { ...d.memory_pressure, ...parsed.memory_pressure },
   }
 }
 
