@@ -42,6 +42,17 @@ export interface ScopedRecallResult extends RecallResult {
   projectMemories: RelevantMemory[];
 }
 
+/** Async recall handle — fire-and-forget, consumed via settledAt polling. */
+export interface RecallHandle {
+  promise: Promise<ScopedRecallResult>;
+  /** Set by promise.finally(). null until settled. */
+  settledAt: number | null;
+  /** True after memory has been injected — prevents double-inject. */
+  consumed: boolean;
+  /** Associated session ID. */
+  sessionId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------

@@ -22,7 +22,7 @@ import type { MemoryStore } from "./store.js"
 import { getMemoryDir, ensureMemoryDir, getUserMemoryDir } from "./paths.js"
 import { buildMemoryPrompt, buildScopedMemoryPrompt } from "./prompt.js"
 import { recallMemories, recallMemoriesMultiScope } from "./recall.js"
-import type { ScopedRecallResult } from "./recall.js"
+import type { ScopedRecallResult, RecallHandle } from "./recall.js"
 import { defineMemoryTools } from "./tools.js"
 import { extractSessionMemory } from "./extraction.js"
 import { shouldRunDream, runDreamConsolidation } from "./dream.js"
@@ -33,7 +33,7 @@ import type { RuntimeAdapter } from "./adapter.js"
 import { captureSession } from "./capture.js"
 import type { CaptureContext } from "./capture.js"
 import { updateState, recordEvent } from "./state.js"
-import { initLogger, error as logError, warn as logWarn } from "./log.js"
+import { initLogger, error as logError } from "./log.js"
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -167,9 +167,12 @@ export const MemoryPlugin: Plugin = async (input) => {
     },
   }
 
-  // 6. Recall cache (bounded)
+  // 6. Recall cache (bounded) — for already-consumed results
   const sessionRecallCache = new Map<string, ScopedRecallResult>()
   const MAX_RECALL_CACHE_SIZE = 100
+
+  // Pending recall handle — tracks async recall for cross-turn injection
+  let pendingRecall: RecallHandle | undefined
 
   function setRecallCache(sessionID: string, result: ScopedRecallResult): void {
     if (sessionRecallCache.size >= MAX_RECALL_CACHE_SIZE && !sessionRecallCache.has(sessionID)) {
@@ -202,9 +205,41 @@ export const MemoryPlugin: Plugin = async (input) => {
         output.system.push(prompt)
       }
 
-      // Inject recalled memories if available for this session
+      // Inject recalled memories — check pendingRecall first, then cache
       const sessionID = input.sessionID
       if (!sessionID) return
+
+      // 1. Check pending recall (async handle from chat.message)
+      const handle = pendingRecall
+      if (handle && handle.settledAt !== null && !handle.consumed) {
+        handle.consumed = true
+        pendingRecall = undefined
+        try {
+          const result = await handle.promise // already settled — returns immediately
+          setRecallCache(sessionID, result)
+          if (result.userMemories.length > 0 || result.projectMemories.length > 0) {
+            const allMemories = [...result.userMemories, ...result.projectMemories]
+            const contentMap = new Map(allMemories.map((m) => [m.filename, m.content]))
+            const [userHeaders, projectHeaders] = await Promise.all([
+              userStore ? scanMemoryFiles(userStore) : Promise.resolve([]),
+              scanMemoryFiles(store),
+            ])
+            const selectedUserHeaders = userHeaders.filter((h) =>
+              result.userMemories.some((m) => m.filename === h.filename))
+            const selectedProjectHeaders = projectHeaders.filter((h) =>
+              result.projectMemories.some((m) => m.filename === h.filename))
+            const formatted = formatMemoriesByScope(
+              selectedUserHeaders, selectedProjectHeaders, contentMap,
+              config.staleness.warnAfterDays)
+            if (formatted) output.system.push(formatted)
+          }
+        } catch {
+          // recall failed — silent
+        }
+        return
+      }
+
+      // 2. Check cached recall (already consumed in a previous turn)
       const recallResult = sessionRecallCache.get(sessionID)
       if (
         recallResult &&
@@ -218,19 +253,16 @@ export const MemoryPlugin: Plugin = async (input) => {
         const contentMap = new Map(
           allMemories.map((m) => [m.filename, m.content]),
         )
-
         const [userHeaders, projectHeaders] = await Promise.all([
           userStore ? scanMemoryFiles(userStore) : Promise.resolve([]),
           scanMemoryFiles(store),
         ])
-
         const selectedUserHeaders = userHeaders.filter((h) =>
           recallResult.userMemories.some((m) => m.filename === h.filename),
         )
         const selectedProjectHeaders = projectHeaders.filter((h) =>
           recallResult.projectMemories.some((m) => m.filename === h.filename),
         )
-
         const formatted = formatMemoriesByScope(
           selectedUserHeaders,
           selectedProjectHeaders,
@@ -266,41 +298,29 @@ export const MemoryPlugin: Plugin = async (input) => {
       const query = extractQueryFromMessage(output.message)
       if (!query || query.length < config.recall.minQueryLength) return
 
-      // Fire recall in background — do NOT await (async prefetch)
-      if (config.recall.background) {
-        if (userStore) {
-          void recallMemoriesMultiScope(query, userStore, store, config, recallClient)
-            .then((result) => {
-              setRecallCache(sid, result)
-            })
-            .catch((err) => {
-              logWarn("memory:recall", `session=${sid} error=${err instanceof Error ? err.message : String(err)}`)
-            })
-        } else {
-          void recallMemories(query, store, config, recallClient)
-            .then((result) => {
-              setRecallCache(sid, {
-                ...result,
-                userMemories: [],
-                projectMemories: result.memories,
-              })
-            })
-            .catch((err) => {
-              logWarn("memory:recall", `session=${sid} error=${err instanceof Error ? err.message : String(err)}`)
-            })
-        }
-      } else {
-        if (userStore) {
-          const result = await recallMemoriesMultiScope(query, userStore, store, config, recallClient)
-          setRecallCache(sid, result)
-        } else {
-          const result = await recallMemories(query, store, config, recallClient)
-          setRecallCache(sid, {
-            ...result,
+      // Fire recall — create RecallHandle (never await in background mode)
+      const recallPromise = userStore
+        ? recallMemoriesMultiScope(query, userStore, store, config, recallClient)
+        : recallMemories(query, store, config, recallClient).then((r) => ({
+            ...r,
             userMemories: [],
-            projectMemories: result.memories,
-          })
+            projectMemories: r.memories,
+          }))
+
+      if (config.recall.background) {
+        const handle: RecallHandle = {
+          promise: recallPromise,
+          settledAt: null,
+          consumed: false,
+          sessionId: sid,
         }
+        void recallPromise
+          .then(() => { handle.settledAt = Date.now() })
+          .catch(() => { handle.settledAt = Date.now() })
+        pendingRecall = handle
+      } else {
+        const result = await recallPromise
+        setRecallCache(sid, result)
       }
     },
 
