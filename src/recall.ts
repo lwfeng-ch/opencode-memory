@@ -13,6 +13,7 @@
  */
 
 import type { MemoryHeader, MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js";
+import { resolveAgentConfig } from "./config.js";
 import type { MemoryStore } from "./store.js";
 import { scanMemoryFiles, formatManifest } from "./scan.js";
 import { memoryAgeDays } from "./staleness.js";
@@ -402,8 +403,7 @@ export async function recallMemories(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const createOpts: AgentSessionCreateOptions = {};
-    if (config.models.recall) createOpts.model = config.models.recall;
+    const createOpts = resolveAgentConfig(config, "recall");
     const session = await client.session.create(createOpts);
     sessionId = session.id;
   } catch {
@@ -628,8 +628,7 @@ export async function recallMemoriesMultiScope(
   // Create session for the rerank call
   let sessionId: string;
   try {
-    const createOpts: AgentSessionCreateOptions = {};
-    if (config.models.recall) createOpts.model = config.models.recall;
+    const createOpts = resolveAgentConfig(config, "recall");
     const session = await client.session.create(createOpts);
     sessionId = session.id;
   } catch {

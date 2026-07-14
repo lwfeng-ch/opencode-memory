@@ -32,6 +32,34 @@ export interface AgentSessionCreateOptions {
   model?: string
 }
 
+/**
+ * Resolve agent config for a specific pipeline stage.
+ * Priority: agents.{stage} > legacy config (models.{stage} / *.category / *.subagentType)
+ *
+ * Safety: category labels (quick/deep/explore) are NOT passed as body.agent
+ * (historical bug: SDK returns HTTP 500 for unrecognized agent names).
+ */
+export function resolveAgentConfig(
+  config: MemoryPluginConfig,
+  stage: "recall" | "extraction" | "dream",
+): AgentSessionCreateOptions {
+  const agentConfig = config.agents[stage]
+  const model = agentConfig.model ?? config.models[stage] ?? undefined
+  let agent: string | undefined
+  if (stage === "recall") {
+    agent = agentConfig.agent ?? config.recall.subagentType
+  } else {
+    agent = agentConfig.agent ?? agentConfig.category
+  }
+  const opts: AgentSessionCreateOptions = {}
+  // Category labels must not be passed as body.agent
+  if (agent && !["quick", "deep", "explore"].includes(agent)) {
+    opts.agent = agent
+  }
+  if (model) opts.model = model
+  return opts
+}
+
 // ---------------------------------------------------------------------------
 // Memory type taxonomy (ported from Claude Code, kept compatible)
 // ---------------------------------------------------------------------------

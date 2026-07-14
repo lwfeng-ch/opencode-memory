@@ -25,6 +25,7 @@
 
 import { join } from "path"
 import type { MemoryPluginConfig, AgentSessionCreateOptions } from "./config.js"
+import { resolveAgentConfig } from "./config.js"
 import type { MemoryStore } from "./store.js"
 import type { RuntimeAdapter } from "./adapter.js"
 import { info as logInfo, error as logError } from "./log.js"
@@ -335,8 +336,7 @@ async function orientPhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = {}
-  if (config.models.dream) createOpts.model = config.models.dream
+  const createOpts = resolveAgentConfig(config, "dream")
   const session = await adapter.session.create(createOpts)
   const response = await adapter.session.prompt(session.id, prompt)
   return parseJsonResponse(response)
@@ -418,8 +418,7 @@ async function gatherPhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = {}
-  if (config.models.dream) createOpts.model = config.models.dream
+  const createOpts = resolveAgentConfig(config, "dream")
   const session = await adapter.session.create(createOpts)
   const response = await adapter.session.prompt(session.id, prompt)
   return parseJsonResponse(response)
@@ -489,8 +488,7 @@ async function consolidatePhase(
     `}`,
   ].join("\n")
 
-  const createOpts: AgentSessionCreateOptions = {}
-  if (config.models.dream) createOpts.model = config.models.dream
+  const createOpts = resolveAgentConfig(config, "dream")
   const session = await adapter.session.create(createOpts)
   const response = await adapter.session.prompt(session.id, prompt)
 

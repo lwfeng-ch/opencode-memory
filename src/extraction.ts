@@ -17,6 +17,7 @@
 import { readFile, writeFile, mkdir } from "fs/promises"
 import { dirname, join } from "path"
 import type { MemoryPluginConfig, AgentSessionCreateOptions, MemoryHeader } from "./config.js"
+import { resolveAgentConfig } from "./config.js"
 import type { MemoryStore } from "./store.js"
 import type { RuntimeAdapter } from "./adapter.js"
 import { getFactSessionPath, getProcessingDir } from "./paths.js"
@@ -813,8 +814,7 @@ export async function extractSessionMemory(
     // ────────────────────────────────────────────────────────────────────
     let extractSessionId: string
     try {
-      const createOpts: AgentSessionCreateOptions = {}
-      if (config.models.extraction) createOpts.model = config.models.extraction
+      const createOpts = resolveAgentConfig(config, "extraction")
       const extractSession = await adapter.session.create(createOpts)
       extractSessionId = extractSession.id
     } catch (err: unknown) {
