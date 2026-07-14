@@ -260,6 +260,11 @@ function buildExtractionPrompt(
     "</existing_memories>",
     "",
     "Rules:",
+    "- Start your output with YAML frontmatter:",
+    '  ---',
+    '  name: "Session: <short topic>"',
+    '  description: "<5-10 word summary of what this session covered>"',
+    '  ---',
     "- Maintain section headers and italic descriptions exactly",
     "- Only update content BELOW the italic descriptions",
     "- Write detailed, info-dense content (file paths, function names, errors)",
@@ -268,7 +273,7 @@ function buildExtractionPrompt(
     '- Always update "Current State" to reflect most recent work',
     "- Do NOT recreate memories that already exist in <existing_memories>",
     "",
-    "Output the COMPLETE updated file content.",
+    "Output the COMPLETE file content (frontmatter + sections).",
   ]
 
   return sections.join("\n")
@@ -423,10 +428,18 @@ function formatExistingMemories(
  * record via `fact_id`, and marks the confidence level as `inferred`
  * (LLM extraction inferred this from facts).
  */
-function buildProvenanceFrontmatter(sessionId: string): string {
-  return [
+function buildProvenanceFrontmatter(
+  sessionId: string,
+  name?: string | null,
+  description?: string | null,
+): string {
+  const lines = [
     "---",
     "type: project",
+  ]
+  if (name) lines.push(`name: ${name}`)
+  if (description) lines.push(`description: ${description}`)
+  lines.push(
     "source:",
     "  kind: extraction",
     `  fact_id: ${sessionId}`,
@@ -435,7 +448,8 @@ function buildProvenanceFrontmatter(sessionId: string): string {
     "schema_version: 2",
     "---",
     "",
-  ].join("\n")
+  )
+  return lines.join("\n")
 }
 
 /**
@@ -449,6 +463,39 @@ function stripFrontmatter(content: string): string {
   const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
   if (match) return content.slice(match[0].length)
   return content
+}
+
+/**
+ * Parse name and description from LLM-generated frontmatter.
+ * @returns `{ name, description, body }` — body has frontmatter stripped.
+ *          If no frontmatter found, name/description are null, body = input.
+ */
+function parseSemanticFrontmatter(
+  content: string,
+): { name: string | null; description: string | null; body: string } {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
+  if (!match) {
+    return { name: null, description: null, body: content }
+  }
+
+  const yaml = match[1]
+  const body = content.slice(match[0].length)
+
+  let name: string | null = null
+  let description: string | null = null
+
+  for (const line of yaml.split(/\r?\n/)) {
+    const nameMatch = line.match(/^name:\s*(.*)$/)
+    if (nameMatch) {
+      name = nameMatch[1].trim().replace(/^["']|["']$/g, "")
+    }
+    const descMatch = line.match(/^description:\s*(.*)$/)
+    if (descMatch) {
+      description = descMatch[1].trim().replace(/^["']|["']$/g, "")
+    }
+  }
+
+  return { name, description, body }
 }
 
 // ---------------------------------------------------------------------------
@@ -910,13 +957,26 @@ export async function extractSessionMemory(
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // Step 8: Write the semantic session memory file with provenance
+    // Step 8: Parse LLM frontmatter, validate, and write to store
     //
-    // The LLM response (template content) is prepended with provenance
-    // frontmatter linking it back to the source fact record.
+    // The LLM response may include YAML frontmatter with name/description.
+    // We parse it out, validate the body, then prepend provenance frontmatter
+    // (with optional name/description) before writing.
     // ────────────────────────────────────────────────────────────────────
-    const provenance = buildProvenanceFrontmatter(sessionId)
-    const semanticContent = provenance + responseText
+    const { name, description, body: responseBody } = parseSemanticFrontmatter(responseText)
+
+    // Validate the body (without frontmatter)
+    const { validateExtractionOutput } = await import("./extraction-validator.js")
+    const validation = validateExtractionOutput(responseBody)
+    if (!validation.valid) {
+      const errorMsg = `Extraction output validation failed: ${validation.errors.join("; ")}`
+      logError("memory:extraction", `session=${sessionId} validation: ${validation.errors.join("; ")}`)
+      await recordExtractionFailure(memoryDir, sessionId, statePath, errorMsg, null)
+      return { success: false, error: errorMsg }
+    }
+
+    const provenance = buildProvenanceFrontmatter(sessionId, name, description)
+    const semanticContent = provenance + responseBody
     await store.write(semanticFile, semanticContent)
 
     // ────────────────────────────────────────────────────────────────────
