@@ -171,8 +171,8 @@ export const MemoryPlugin: Plugin = async (input) => {
   const sessionRecallCache = new Map<string, ScopedRecallResult>()
   const MAX_RECALL_CACHE_SIZE = 100
 
-  // Pending recall handle — tracks async recall for cross-turn injection
-  let pendingRecall: RecallHandle | undefined
+  // Pending recall handles — per-session, tracks async recall for cross-turn injection
+  const pendingRecallMap = new Map<string, RecallHandle>()
 
   function setRecallCache(sessionID: string, result: ScopedRecallResult): void {
     if (sessionRecallCache.size >= MAX_RECALL_CACHE_SIZE && !sessionRecallCache.has(sessionID)) {
@@ -211,11 +211,11 @@ export const MemoryPlugin: Plugin = async (input) => {
       const sessionID = input.sessionID
       if (!sessionID) return
 
-      // 1. Check pending recall (async handle from chat.message)
-      const handle = pendingRecall
+      // 1. Check pending recall (async handle from chat.message) — per session
+      const handle = pendingRecallMap.get(sessionID)
       if (handle && handle.settledAt !== null && !handle.consumed) {
         handle.consumed = true
-        pendingRecall = undefined
+        pendingRecallMap.delete(sessionID)
         try {
           const result = await handle.promise // already settled — returns immediately
           setRecallCache(sessionID, result)
@@ -320,7 +320,7 @@ export const MemoryPlugin: Plugin = async (input) => {
         void recallPromise
           .then(() => { handle.settledAt = Date.now() })
           .catch(() => { handle.settledAt = Date.now() })
-        pendingRecall = handle
+        pendingRecallMap.set(sid, handle)
       } else {
         const result = await recallPromise
         setRecallCache(sid, result)

@@ -22,6 +22,7 @@ import type { ToolDefinition } from "@opencode-ai/plugin"
 import type { MemoryStore } from "./store.js"
 import type { MemoryPluginConfig, MemoryHeader } from "./config.js"
 import { MEMORY_TYPES, MEMORY_SCOPES, parseMemoryType, resolveMemoryScope, parseMemoryScope, CONFIDENCE_LEVELS, parseConfidence } from "./config.js"
+import { deleteEntry } from "./store.js"
 import { getDailyLogPath } from "./paths.js"
 import { loadState } from "./state.js"
 import { calculateHealthScore, healthStatus, formatStatusReport } from "./health.js"
@@ -399,7 +400,6 @@ export function defineMemoryTools(
         if (entryId !== undefined) {
           // Entry-level deletion
           try {
-            const { deleteEntry } = await import("./store.js")
             const result = await deleteEntry(targetStore, filename, entryId)
             if (result.deletedFile) {
               const indexRaw = await targetStore.getIndex()

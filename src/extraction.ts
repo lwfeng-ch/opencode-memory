@@ -701,7 +701,7 @@ export async function extractSessionMemory(
   const semanticFile = sessionSemanticPath(sessionId)
   const t0 = Date.now()
 
-  await logEvent(memoryDir, {
+  void logEvent(memoryDir, {
     timestamp: new Date().toISOString(),
     type: "extraction.started",
     session_id: sessionId,
@@ -765,9 +765,11 @@ export async function extractSessionMemory(
     // processed yet. Falls back to fact record alone if adapter fails.
     // ────────────────────────────────────────────────────────────────────
     let messages: unknown[] = []
+    // SDK doesn't support offset-based pagination, so we fetch all messages
+    // and slice. The cursor ensures we only SEND new messages to the LLM.
+    // Limit to 500 to bound API payload size (cursor handles the rest).
     try {
-      const allMessages = await adapter.session.messages(sessionId, 10000)
-      // History compression guard: clamp offset if history shrank
+      const allMessages = await adapter.session.messages(sessionId, 500)
       const safeOffset = cursorOffset > allMessages.length ? 0 : cursorOffset
       messages = allMessages.slice(safeOffset)
     } catch {
@@ -784,7 +786,7 @@ export async function extractSessionMemory(
       })
     await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
 
-    await logEvent(memoryDir, {
+    void logEvent(memoryDir, {
       timestamp: new Date().toISOString(),
       type: "extraction.completed",
       session_id: sessionId,

@@ -658,7 +658,7 @@ export async function runDreamConsolidation(
   const errors: string[] = []
   const t0 = Date.now()
 
-  await logEvent(store.getDir(), {
+  void logEvent(store.getDir(), {
     timestamp: new Date().toISOString(),
     type: "dream.started",
   })
@@ -712,7 +712,7 @@ export async function runDreamConsolidation(
       errors.push(`promotion: ${err instanceof Error ? err.message : String(err)}`)
     }
 
-    await logEvent(store.getDir(), {
+    void logEvent(store.getDir(), {
       timestamp: new Date().toISOString(),
       type: "dream.completed",
       duration_ms: Date.now() - t0,

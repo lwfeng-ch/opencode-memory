@@ -18,6 +18,8 @@ import type { MemoryStore } from "./store.js";
 import { scanMemoryFiles, formatManifest } from "./scan.js";
 import { memoryAgeDays } from "./staleness.js";
 import { checkMemoryPressure } from "./health.js";
+import type { MemoryPressureReport } from "./health.js";
+import { logEvent } from "./telemetry.js";
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -95,6 +97,27 @@ function isTransientToolMemory(header: MemoryHeader, recentTools: string[]): boo
   if (!hasTransient) return false
   const hasDurable = DURABLE_TOOL_MARKERS.some((m) => haystack.includes(m))
   return !hasDurable
+}
+
+// ---------------------------------------------------------------------------
+// Pressure cache — avoid scanning on every chat.message
+// ---------------------------------------------------------------------------
+
+let cachedPressure: { report: MemoryPressureReport; timestamp: number } | null = null
+const PRESSURE_CACHE_TTL_MS = 60_000 // 60 seconds
+
+/** Get pressure report from cache, or compute fresh if expired. */
+async function getCachedPressure(
+  store: MemoryStore,
+  config: MemoryPluginConfig,
+): Promise<MemoryPressureReport> {
+  const now = Date.now()
+  if (cachedPressure && now - cachedPressure.timestamp < PRESSURE_CACHE_TTL_MS) {
+    return cachedPressure.report
+  }
+  const report = await checkMemoryPressure(store, config)
+  cachedPressure = { report, timestamp: now }
+  return report
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +352,7 @@ export async function recallMemories(
   },
   recentTools: string[] = [],
 ): Promise<RecallResult> {
+  const t0 = Date.now()
   // -----------------------------------------------------------------------
   // Stage 1: Rule filter
   // -----------------------------------------------------------------------
@@ -348,6 +372,12 @@ export async function recallMemories(
   );
 
   if (filtered.length === 0) {
+    void logEvent(store.getDir(), {
+      timestamp: new Date().toISOString(),
+      type: "recall.skipped",
+      duration_ms: Date.now() - t0,
+      payload: { reason: "no_matches", docs_scanned: allHeaders.length },
+    })
     return {
       memories: [],
       stage1Count: 0,
@@ -385,8 +415,8 @@ export async function recallMemories(
   // Pressure-aware LLM rerank: skip on critical pressure
   let skipRerank: boolean = config.recall.llmRerankDisabled;
   try {
-    const pressure = await checkMemoryPressure(store, config);
-    if (pressure.level === "critical") skipRerank = true as boolean;
+    const pressure = await getCachedPressure(store, config);
+    if (pressure.level === "critical") skipRerank = true;
   } catch { /* pressure check failed — keep existing skipRerank */ }
 
   if (skipRerank) {
@@ -440,6 +470,13 @@ export async function recallMemories(
       valid.includes(h.filename),
     );
     const memories = await buildResultFromHeaders(selectedHeaders, store);
+
+    void logEvent(store.getDir(), {
+      timestamp: new Date().toISOString(),
+      type: "recall.completed",
+      duration_ms: Date.now() - t0,
+      payload: { docs_scanned: stage1Count, docs_selected: memories.length, strategy: "model" },
+    })
 
     return {
       memories,
