@@ -35,6 +35,7 @@ import { scanMemoryFiles, formatManifest } from "./scan.js"
 import { acquireLock, releaseLock, getLockMtime, isLockHeld } from "./lock.js"
 import { promoteStaging } from "./promotion.js"
 import { checkMemoryPressure } from "./health.js"
+import { logEvent } from "./telemetry.js"
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -655,6 +656,12 @@ export async function runDreamConsolidation(
 
   const phases: string[] = []
   const errors: string[] = []
+  const t0 = Date.now()
+
+  await logEvent(store.getDir(), {
+    timestamp: new Date().toISOString(),
+    type: "dream.started",
+  })
 
   try {
     // Phase 1 — Orient
@@ -704,6 +711,13 @@ export async function runDreamConsolidation(
     } catch (err) {
       errors.push(`promotion: ${err instanceof Error ? err.message : String(err)}`)
     }
+
+    await logEvent(store.getDir(), {
+      timestamp: new Date().toISOString(),
+      type: "dream.completed",
+      duration_ms: Date.now() - t0,
+      payload: { phases },
+    })
 
     return {
       success: errors.length === 0,

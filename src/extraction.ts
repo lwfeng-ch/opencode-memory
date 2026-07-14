@@ -16,7 +16,7 @@
 
 import { readFile, writeFile, mkdir } from "fs/promises"
 import { dirname, join } from "path"
-import type { MemoryPluginConfig, AgentSessionCreateOptions, MemoryHeader } from "./config.js"
+import type { MemoryPluginConfig, MemoryHeader } from "./config.js"
 import { resolveAgentConfig } from "./config.js"
 import type { MemoryStore } from "./store.js"
 import type { RuntimeAdapter } from "./adapter.js"
@@ -24,6 +24,7 @@ import { getFactSessionPath, getProcessingDir } from "./paths.js"
 import { updateState } from "./state.js"
 import { info as logInfo, error as logError } from "./log.js"
 import { readCursor, writeCursor } from "./cursor.js"
+import { logEvent } from "./telemetry.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -698,6 +699,13 @@ export async function extractSessionMemory(
   statePath: string,
 ): Promise<{ success: boolean; error?: string }> {
   const semanticFile = sessionSemanticPath(sessionId)
+  const t0 = Date.now()
+
+  await logEvent(memoryDir, {
+    timestamp: new Date().toISOString(),
+    type: "extraction.started",
+    session_id: sessionId,
+  })
 
   try {
     // ────────────────────────────────────────────────────────────────────
@@ -774,7 +782,14 @@ export async function extractSessionMemory(
         lastProcessedAt: new Date().toISOString(),
         lastTouchedFiles: [],
       })
-      await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
+    await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
+
+    await logEvent(memoryDir, {
+      timestamp: new Date().toISOString(),
+      type: "extraction.completed",
+      session_id: sessionId,
+      duration_ms: Date.now() - t0,
+    })
       return { success: true }
     }
     const conversationText = extractConversationText(messages)
