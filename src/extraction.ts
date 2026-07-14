@@ -22,6 +22,7 @@ import type { RuntimeAdapter } from "./adapter.js"
 import { getFactSessionPath, getProcessingDir } from "./paths.js"
 import { updateState } from "./state.js"
 import { info as logInfo, error as logError } from "./log.js"
+import { readCursor, writeCursor } from "./cursor.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -743,18 +744,37 @@ export async function extractSessionMemory(
     }
 
     // ────────────────────────────────────────────────────────────────────
-    // Step 3: Read recent message snapshot
+    // Step 2.5: Read extraction cursor (for incremental processing)
+    // ────────────────────────────────────────────────────────────────────
+    const cursor = await readCursor(memoryDir, sessionId)
+    const cursorOffset = cursor?.processedMessageOffset ?? 0
+
+    // ────────────────────────────────────────────────────────────────────
+    // Step 3: Read recent message snapshot (incremental — only new messages)
     //
-    // The fact record provides stats and tool events, but the actual
-    // conversation content comes from a limited message snapshot. This
-    // keeps the prompt focused on recent context. If the adapter can't
-    // return messages, extraction proceeds with the fact record alone.
+    // Uses the cursor offset to read only messages that haven't been
+    // processed yet. Falls back to fact record alone if adapter fails.
     // ────────────────────────────────────────────────────────────────────
     let messages: unknown[] = []
     try {
-      messages = await adapter.session.messages(sessionId, 30)
+      const allMessages = await adapter.session.messages(sessionId, 10000)
+      // History compression guard: clamp offset if history shrank
+      const safeOffset = cursorOffset > allMessages.length ? 0 : cursorOffset
+      messages = allMessages.slice(safeOffset)
     } catch {
       // Message snapshot is optional — fact record provides context
+    }
+
+    // If no new messages since last cursor, skip extraction (just update timestamp)
+    if (messages.length === 0) {
+      await writeCursor(memoryDir, {
+        sessionId,
+        processedMessageOffset: cursorOffset,
+        lastProcessedAt: new Date().toISOString(),
+        lastTouchedFiles: [],
+      })
+      await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
+      return { success: true }
     }
     const conversationText = extractConversationText(messages)
 
@@ -864,6 +884,17 @@ export async function extractSessionMemory(
     // Step 9: Record success — processing metadata + state.json
     // ────────────────────────────────────────────────────────────────────
     await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
+
+    // ────────────────────────────────────────────────────────────────────
+    // Step 10: Update extraction cursor
+    // ────────────────────────────────────────────────────────────────────
+    const newOffset = (cursorOffset > messages.length ? 0 : cursorOffset) + messages.length
+    await writeCursor(memoryDir, {
+      sessionId,
+      processedMessageOffset: newOffset,
+      lastProcessedAt: new Date().toISOString(),
+      lastTouchedFiles: [semanticFile],
+    })
 
     return { success: true }
   } catch (err: unknown) {

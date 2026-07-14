@@ -180,7 +180,6 @@ export const MemoryPlugin: Plugin = async (input) => {
   }
 
   // 7. Session tracking for Fact Layer capture
-  const extractedSessions = new Set<string>()
   const sessionMessageCount = new Map<string, number>()
   const sessionToolCount = new Map<string, number>()
   const sessionToolEvents = new Map<string, Array<{ type: string; name: string; success: boolean; durationMs: number }>>()
@@ -348,10 +347,8 @@ export const MemoryPlugin: Plugin = async (input) => {
       // captureSession never throws (all errors caught internally)
       await captureSession(captureCtx)
 
-      // --- Phase 2: Extraction (optional, LLM) ---
-      if (config.extraction.enabled && !extractedSessions.has(sessionId)) {
-        extractedSessions.add(sessionId)
-
+      // --- Phase 2: Extraction (optional, LLM, cursor-based) ---
+      if (config.extraction.enabled) {
         // Check if main agent already wrote memories (cooperative)
         const headers = await scanMemoryFiles(store)
         const fiveMinAgo = Date.now() - 300_000
