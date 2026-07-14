@@ -149,7 +149,7 @@ const TYPE_KEYWORDS: Array<{ words: string[]; type: string }> = [
  *      matching the memory's type
  *   3. Recency bonus — max(0, 3 - floor(ageDays / 7)), decays over 3 weeks
  */
-function scoreMemory(query: string, header: MemoryHeader): number {
+export function scoreMemory(query: string, header: MemoryHeader): number {
   const queryLower = query.toLowerCase();
 
   // --- Keyword overlap ---
