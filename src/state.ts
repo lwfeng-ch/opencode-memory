@@ -16,6 +16,9 @@ import { dirname } from "path"
 // Types
 // ---------------------------------------------------------------------------
 
+/** Dream scheduling mode — controls activity windows for health scoring. */
+export type DreamMode = "development" | "normal" | "production"
+
 export interface PipelineState {
   version: number
   updated_at: string
@@ -41,7 +44,7 @@ export interface PipelineState {
   }
   dream: {
     last_run_at: string | null
-    mode: string
+    mode: DreamMode
     total_runs: number
     last_error: string | null
     messages_since_last: number
@@ -117,9 +120,17 @@ export const DEFAULT_STATE: PipelineState = {
 // ---------------------------------------------------------------------------
 
 /** Merge a parsed (possibly partial) state with DEFAULT_STATE so that
- *  new fields added in future versions don't break old state.json files. */
+ *  new fields added in future versions don't break old state.json files.
+ *
+ *  The `dream.mode` field is validated against the `DreamMode` union —
+ *  invalid values fall back to `"normal"` (conservative default). */
 export function mergeState(parsed: Partial<PipelineState>): PipelineState {
   const d = DEFAULT_STATE
+  const dreamMerged = { ...d.dream, ...parsed.dream }
+  // Validate mode — invalid strings from disk default to "normal"
+  if (dreamMerged.mode !== "development" && dreamMerged.mode !== "normal" && dreamMerged.mode !== "production") {
+    dreamMerged.mode = "normal"
+  }
   return {
     version: parsed.version ?? d.version,
     updated_at: parsed.updated_at ?? d.updated_at,
@@ -127,7 +138,7 @@ export function mergeState(parsed: Partial<PipelineState>): PipelineState {
     adapter_status: { ...d.adapter_status, ...parsed.adapter_status },
     capture: { ...d.capture, ...parsed.capture },
     extraction: { ...d.extraction, ...parsed.extraction },
-    dream: { ...d.dream, ...parsed.dream },
+    dream: dreamMerged,
     recall: { ...d.recall, ...parsed.recall },
     events_received: parsed.events_received ?? d.events_received,
     memory_pressure: { ...d.memory_pressure, ...parsed.memory_pressure },

@@ -28,18 +28,32 @@ import { error as logError } from "./log.js"
 // Confidence priority (enforced by code, not LLM judgment)
 // ---------------------------------------------------------------------------
 
-/** Priority map: explicit(4) > observed(3) > inferred(2) > derived(1). */
+/**
+ * Priority map for confidence-based override resolution.
+ *
+ * Two confidence systems coexist:
+ *   - User-facing (config.ts): explicit, inferred, uncertain
+ *   - Dream-internal (promotion.ts): explicit, observed, inferred, derived
+ *
+ * `uncertain` is explicitly mapped to 0 (lowest) so it can be overridden by
+ * any Dream-produced memory. Without this entry, `uncertain` would fall
+ * through to the `?? 0` fallback in `canOverride` — same result, but the
+ * intent would be implicit rather than documented.
+ *
+ * Priority order: explicit(4) > observed(3) > inferred(2) > derived(1) > uncertain(0)
+ */
 const CONFIDENCE_PRIORITY: Record<string, number> = {
   explicit: 4,
   observed: 3,
   inferred: 2,
   derived: 1,
+  uncertain: 0,
 }
 
 /**
  * Check whether a new memory can override an existing one based on confidence.
  *
- * Priority order: explicit > observed > inferred > derived
+ * Priority order: explicit > observed > inferred > derived > uncertain
  *
  * @returns `true` if `newConfidence` is strictly higher than `oldConfidence`.
  *          `false` if `newConfidence` is less than or equal to `oldConfidence`.

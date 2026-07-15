@@ -15,7 +15,7 @@
  * isn't "unhealthy", it's just idle.
  */
 
-import type { PipelineState } from "./state.js"
+import type { PipelineState, DreamMode } from "./state.js"
 import type { MemoryStore } from "./store.js"
 import type { MemoryPluginConfig } from "./config.js"
 
@@ -26,7 +26,7 @@ import type { MemoryPluginConfig } from "./config.js"
 const HOUR = 3_600_000
 const DAY = 86_400_000
 
-const MODE_WINDOWS: Record<string, number> = {
+const MODE_WINDOWS: Record<DreamMode, number> = {
   development: HOUR, // 1 hour
   normal: DAY, // 24 hours
   production: 7 * DAY, // 7 days
@@ -34,7 +34,7 @@ const MODE_WINDOWS: Record<string, number> = {
 
 /** Activity window for the given dream mode. Unknown modes fall back to
  *  the `normal` window (24 h) — conservative default. */
-function modeWindow(mode: string): number {
+function modeWindow(mode: DreamMode): number {
   return MODE_WINDOWS[mode] ?? MODE_WINDOWS.normal
 }
 

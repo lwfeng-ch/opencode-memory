@@ -130,7 +130,7 @@ export async function captureSession(ctx: CaptureContext): Promise<void> {
 
     // 5. Assemble the fact record (integrity.hash is placeholder for now)
     const record: FactSessionRecord = {
-      $id: "memory://fact-session/v1",
+      $id: `memory://fact-session/${ctx.sessionId}`,
       session_id: ctx.sessionId,
       created_at: createdAt,
       ended_at: endedAt,
