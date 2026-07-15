@@ -28,6 +28,8 @@ import { logEvent } from "./telemetry.js"
 import { scoreMemory } from "./recall.js"
 import { shouldMerge } from "./fingerprint.js"
 import { readMessages } from "./message-cache.js"
+import { detectExplicitFeedback, buildExplicitFeedbackMemory } from "./explicit-feedback.js"
+import { detectStructuredObservations, buildCandidateMemory, getCandidateDir } from "./candidate.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -874,6 +876,27 @@ export async function extractSessionMemory(
     const conversationText = extractConversationText(messages)
 
     // ────────────────────────────────────────────────────────────────────
+    // Step 3.5: Scan for explicit feedback signals — bypass normal extraction
+    //
+    // Explicit user signals ("记住", "always use", "never use") are saved
+    // directly with confidence: explicit, source: agent_save.
+    // Everything else goes through the normal extraction → Dream pipeline.
+    // ────────────────────────────────────────────────────────────────────
+    for (const msg of messages) {
+      const text = typeof msg === "object" && msg !== null
+        ? (msg as Record<string, unknown>).content as string ?? ""
+        : typeof msg === "string" ? msg : ""
+      if (typeof text !== "string") continue
+      const feedback = detectExplicitFeedback(text)
+      if (feedback) {
+        try {
+          const filename = `feedback_${Date.now()}.md`
+          await store.write(filename, buildExplicitFeedbackMemory(feedback))
+        } catch { /* non-fatal */ }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Step 4: Build fact summary (used for both existing memories filtering
     // and the extraction prompt)
     // ────────────────────────────────────────────────────────────────────
@@ -1010,6 +1033,25 @@ export async function extractSessionMemory(
     }
 
     await store.write(semanticFile, semanticContent)
+
+    // ────────────────────────────────────────────────────────────────────
+    // Step 8.5: Detect structured observations — write as candidates
+    //
+    // Candidates with explicit/observed confidence are auto-promoted.
+    // Candidates with inferred confidence go to Dream for review.
+    // ────────────────────────────────────────────────────────────────────
+    const candidates = detectStructuredObservations(
+      messages.map((m) => ({
+        role: typeof m === "object" && m !== null ? (m as Record<string, unknown>).role as string : undefined,
+        content: typeof m === "object" && m !== null ? (m as Record<string, unknown>).content as string : String(m),
+      }))
+    )
+    for (const candidate of candidates) {
+      const candidateFile = `${getCandidateDir(memoryDir)}/${candidate.candidateType}_candidate_${Date.now()}.md`
+      try {
+        await store.write(candidateFile, buildCandidateMemory(candidate, sessionId))
+      } catch { /* non-fatal */ }
+    }
 
     // ────────────────────────────────────────────────────────────────────
     // Step 9: Record success — processing metadata + state.json

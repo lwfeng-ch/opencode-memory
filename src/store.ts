@@ -12,6 +12,7 @@
 import { join, basename, isAbsolute, dirname } from "path"
 import { mkdir, readdir, readFile, writeFile, unlink, stat, appendFile, open } from "fs/promises"
 import type { MemoryHeader } from "./config.js"
+import { isSafePath, checkSymlinkSafe } from "./pathguard.js"
 import { parseConfidence } from "./config.js"
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,10 @@ export class FileSystemStore implements MemoryStore {
 
   async write(filename: string, content: string): Promise<void> {
     const filePath = this.resolvePath(filename)
+    // Security: reject symlinks pointing outside the memory directory
+    if (!(await checkSymlinkSafe(filePath, this.dir))) {
+      throw new Error(`Symlink safety check failed: ${filename}`)
+    }
     await mkdir(dirname(filePath), { recursive: true })
     await writeFile(filePath, content, { encoding: "utf-8" })
   }
@@ -198,7 +203,11 @@ export class FileSystemStore implements MemoryStore {
 
   /** Resolve a filename to an absolute path within the memory dir. */
   private resolvePath(filename: string): string {
-    // Prevent path traversal — reject absolute paths and .. segments
+    // Defense-in-depth: pathguard check alongside existing traversal check
+    if (!isSafePath(filename, this.dir)) {
+      throw new Error(`Path safety check failed: ${filename}`)
+    }
+    // Legacy check (redundant but explicit)
     if (filename.includes("..") || isAbsolute(filename)) {
       throw new Error(`Path traversal rejected: ${filename}`)
     }
