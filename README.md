@@ -8,13 +8,14 @@ Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architectur
 
 ## Features
 
+### Core Pipeline
 - **KAIROS Mode** — Append-only daily logs during active sessions (zero LLM cost), batch extraction on `session.idle`
 - **Incremental Extraction** — Cursor-based message offset tracking; only new messages since the last extraction run are sent to the LLM (reduces cost on long sessions)
 - **Two-Stage Recall** — Rule filter (free, zero model calls) + LLM rerank (one lightweight call on survivors only)
 - **RecallHandle** — Async recall fires on `chat.message`, settles in background, injects on next `system.transform` turn — no blocking, no missed results
 - **Active Tool Filter** — Transient tool-debug memories (e.g. "npm install failed") are filtered from recall when the tool is active; durable markers ("workaround", "known issue") survive
 - **Memory Pressure** — 3-level detection (normal/elevated/critical) based on file count, index size, and total size; critical pressure bypasses dream time gate, elevated halves it
-- **Dream Consolidation** — 4-phase pipeline: Orient → Gather → Consolidate → Prune, runs periodically with 3-gate scheduling + pressure-aware triggering
+- **Dream Consolidation** — 4-phase pipeline: Prepare (orient+gather combined) → Consolidate → Prune, runs periodically with 3-gate scheduling + pressure-aware triggering — 3 LLM calls instead of 4
 - **Entry-Level Deletion** — `memory_delete` supports `entryId` parameter for removing individual entries from multi-entry memory files, not just whole files
 - **Telemetry** — Structured JSONL event logging (`logEvent`/`queryEvents`/`cleanupOldEvents`) for extraction, recall, and dream lifecycle — never blocks the pipeline
 - **Cross-Project Scope** — User-level memories (global preferences) + project-level memories (per-repo context), with priority override
@@ -22,25 +23,49 @@ Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architectur
 - **Staleness Awareness** — Memories older than N days get point-in-time caveats injected into context
 - **Model-Agnostic** — Free-model defaults (`explore`/`quick`/`deep` categories), every stage independently configurable with `resolveAgentConfig` safety check
 
+### Quality & Security (v0.2+)
+- **Extraction Validator** — 4-layer quality gate (schema → section → placeholder → length) before write; prevents garbage content from polluting the memory store
+- **Related Memory Filtering** — `scoreMemory()` pre-filters existing memories to top-10 by keyword relevance; reduces extraction prompt token waste by 60-80%
+- **Semantic Description** — LLM outputs `name`/`description` frontmatter; session memories become searchable by recall's keyword matching
+- **Semantic Fingerprint** — TF-IDF keyword extraction + Jaccard similarity > 0.8 → merge; catches semantic overlap even when exact text differs (not SHA256)
+- **Recall Usage Tracking** — `store.touch()` on recall hits; 180-day prune rule for non-explicit memories; **explicit memories are never auto-deleted**
+- **Message Cache** — `chat.message` hook writes to `fact/messages/*.jsonl`; decouples extraction from SDK API, enables offline replay
+- **MemoryPathGuard** — Symlink protection, `realpath()` check, path escape prevention; security layer for the auto-write system
+- **Explicit Feedback Fast Track** — Detects explicit signals ("记住", "always use", "never use") and saves directly with `confidence: explicit, source: agent_save`; bypasses Dream
+- **Typed Memory Candidate** — Extraction produces `semantic/candidates/` with confidence levels; explicit/observed auto-promote, inferred/derived go through Dream review
+- **Extract Cursor Enhancement** — Reads from local message cache first, falls back to SDK API; true incremental processing
+
 ## Architecture
 
 ```
 src/
-├── index.ts        Plugin entry — wires hooks (system.transform, chat.message, event, tool)
-├── config.ts       Configuration, type taxonomy, scope resolver, resolveAgentConfig
-├── store.ts        Storage abstraction (FileSystemStore), frontmatter parser, parseEntries/deleteEntry
-├── paths.ts        Path resolution (project + user dirs, git root, cursor paths)
-├── prompt.ts       System prompt builder (instructions + MEMORY.md index injection)
-├── recall.ts       Two-stage recall: rule filter → LLM rerank, RecallHandle, isTransientToolMemory, pressure cache
-├── extraction.ts   KAIROS session extraction on session.idle, cursor-based incremental processing
-├── dream.ts        Dream consolidation: 4-phase pipeline + 3-gate scheduling + pressure-aware triggering
-├── cursor.ts       Incremental extraction tracking (readCursor/writeCursor)
-├── health.ts       Memory pressure detection (3-level), health score, status report
-├── telemetry.ts    Structured JSONL event logging (logEvent/queryEvents/cleanupOldEvents)
-├── scan.ts         Directory scanning + manifest/selection formatting
-├── staleness.ts    Age computation + freshness caveats (pure, no I/O)
-├── lock.ts         File-based mutual exclusion (PID + stale timeout)
-└── tools.ts        6 custom tool definitions for the main agent
+├── index.ts              Plugin entry — wires hooks (system.transform, chat.message, event, tool)
+├── config.ts             Configuration, type taxonomy, scope resolver, resolveAgentConfig, DreamMode
+├── store.ts              Storage abstraction (FileSystemStore), frontmatter parser, touch(), pathguard integration
+├── paths.ts              Path resolution (project + user dirs, git root, cursor + message cache paths)
+├── prompt.ts             System prompt builder (instructions + MEMORY.md index injection)
+├── recall.ts             Two-stage recall: rule filter → LLM rerank, RecallHandle, scoreMemory (exported), touch on hit
+├── extraction.ts         KAIROS extraction: validator + fingerprint + semantic description + explicit feedback + candidates
+├── extraction-validator.ts  4-layer quality gate (schema/section/placeholder/length) — pure, no I/O
+├── fingerprint.ts        TF-IDF keyword extraction + Jaccard similarity for semantic dedup — pure
+├── message-cache.ts      Append-only JSONL message cache (chat.message → fact/messages/*.jsonl)
+├── explicit-feedback.ts  Detects explicit signals ("记住"/"always use") — direct save, bypasses Dream
+├── candidate.ts          Typed memory candidates with confidence-based Dream routing
+├── dream.ts              Dream consolidation: prepareDreamContext (orient+gather) → consolidate → prune + 180-day recall prune
+├── pathguard.ts          Symlink protection, realpath check, path escape prevention
+├── cursor.ts             Incremental extraction tracking (readCursor/writeCursor)
+├── health.ts             Memory pressure detection (3-level), health score, DreamMode-typed windows
+├── state.ts              Pipeline state (state.json), DreamMode union type, mergeState validation
+├── telemetry.ts          Structured JSONL event logging (logEvent/queryEvents/cleanupOldEvents)
+├── scan.ts               Directory scanning + manifest/selection formatting
+├── staleness.ts          Age computation + freshness caveats (pure, no I/O)
+├── promotion.ts          Dream change validation + confidence-based conflict resolution
+├── capture.ts            Fact Layer: immutable session record with session-specific $id
+├── adapter.ts            Runtime adapter (SDK → clean interface, git snapshot, health check)
+├── migration.ts          Cross-version data migration
+├── log.ts                File logger (avoids stdout pollution, Windows CJK safe)
+├── lock.ts               File-based mutual exclusion (PID + stale timeout)
+└── tools.ts              6 custom tool definitions for the main agent
 ```
 
 ### Memory Pipeline
@@ -198,23 +223,32 @@ Memory body content...
 ## Testing
 
 ```bash
-# Run all unit + integration tests (139 tests, 18 files)
-bun test test/chain.test.ts test/config-pressure.test.ts test/cursor.test.ts \
-     test/entry-delete.test.ts test/health-pressure.test.ts test/integration.test.ts \
-     test/lock-recall.test.ts test/lock.test.ts test/paths.test.ts test/prompt.test.ts \
-     test/resolve-agent.test.ts test/scan.test.ts test/state-pressure.test.ts \
-     test/staleness.test.ts test/telemetry.test.ts test/tools.test.ts \
-     test/transient-filter.test.ts test/round10-integration.test.ts
+# Run all unit + integration tests (216 tests, 27 files)
+bun test test/chain.test.ts test/candidate.test.ts test/config-pressure.test.ts \
+     test/cursor.test.ts test/dream-prepare.test.ts test/entry-delete.test.ts \
+     test/explicit-feedback.test.ts test/extraction-validator.test.ts test/fingerprint.test.ts \
+     test/health-pressure.test.ts test/integration.test.ts test/lock-recall.test.ts \
+     test/lock.test.ts test/message-cache.test.ts test/paths.test.ts test/pathguard.test.ts \
+     test/promotion.test.ts test/prompt.test.ts test/recall-tracking.test.ts \
+     test/resolve-agent.test.ts test/round10-integration.test.ts test/scan.test.ts \
+     test/state-pressure.test.ts test/staleness.test.ts test/telemetry.test.ts \
+     test/tools.test.ts test/transient-filter.test.ts
 
 # Run individual suites
-bun test test/integration.test.ts              # Dream + Extraction + Plugin (12 tests)
-bun test test/round10-integration.test.ts      # Cursor + Pressure + RecallHandle (14 tests)
-bun test test/cursor.test.ts                   # Cursor read/write (6 tests)
-bun test test/telemetry.test.ts                # Telemetry logging (9 tests)
-bun test test/health-pressure.test.ts          # Pressure detection (6 tests)
+bun test test/extraction-validator.test.ts   # 4-layer quality gate (10 tests)
+bun test test/fingerprint.test.ts            # TF-IDF Jaccard dedup (11 tests)
+bun test test/recall-tracking.test.ts       # touch() + tracking (4 tests)
+bun test test/message-cache.test.ts          # JSONL message cache (5 tests)
+bun test test/pathguard.test.ts             # Symlink/path security (6 tests)
+bun test test/explicit-feedback.test.ts      # Explicit signal detection (5 tests)
+bun test test/dream-prepare.test.ts          # Combined orient+gather (5 tests)
+bun test test/candidate.test.ts              # Typed candidate detection (6 tests)
+bun test test/promotion.test.ts             # Confidence override rules (25 tests)
+bun test test/integration.test.ts            # Dream + Extraction + Plugin (12 tests)
+bun test test/round10-integration.test.ts    # Cursor + Pressure + RecallHandle (14 tests)
 ```
 
-139 tests total across 18 files, all passing.
+216 tests total across 27 files, 213 passing (3 SDK timeout tests require live OpenCode instance).
 
 ## Design Principles
 
@@ -225,7 +259,11 @@ bun test test/health-pressure.test.ts          # Pressure detection (6 tests)
 5. **Telemetry never blocks** — All event logging is fire-and-forget (`void logEvent`); failures are silent
 6. **Loose coupling** — `type` ≠ `scope`; type is semantic, scope is lifecycle, overridable per-memory
 7. **Cooperative, not competitive** — Main agent writes memories proactively; extraction/dream are safety nets
-8. **Defense in depth** — Path traversal protection at both tool layer and store layer
+8. **Defense in depth** — PathGuard (symlink/realpath/escape) + store-layer traversal check = two-layer security
+9. **Quality gate before write** — Extraction output is validated (4-layer check) before entering the memory store
+10. **Semantic dedup over hash** — TF-IDF Jaccard similarity catches semantic overlap even when exact text differs
+11. **Confidence-based routing** — Explicit/observed memories auto-promote; inferred/derived go through Dream review
+12. **Recall-driven governance** — 180-day prune rule for unrecalled non-explicit memories; explicit memories are permanent
 
 ## Memory System Conceptual Q&A
 
@@ -290,3 +328,37 @@ MIT
 - [Claude Code](https://claude.ai) — Original memory pipeline design inspiration
 - [OpenCode](https://opencode.ai) — Plugin architecture and event-driven hooks
 - [oh-my-openagent](https://github.com/anthropics/oh-my-openagent) — Agent category system
+- [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
+
+## Changelog
+
+### v0.2.0 — Extraction Quality & Security (2026-07-15)
+
+**Quality Gate (P0)**
+- Extraction Validator — 4-layer quality gate (schema/section/placeholder/length) before write
+- Related Memory Filtering — `scoreMemory()` pre-filters to top-10, token -60~80%
+
+**Quality Infrastructure (P1)**
+- Semantic Description — LLM outputs `name`/`description` frontmatter for recall matching
+- Semantic Fingerprint — TF-IDF Jaccard > 0.8 dedup, not SHA256
+- Recall Usage Tracking — `store.touch()` + 180-day prune (never delete explicit)
+- Message Cache — `chat.message` → `fact/messages/*.jsonl`, SDK decoupling
+
+**Intelligence & Security (P2)**
+- MemoryPathGuard — symlink protection, realpath check, path escape prevention
+- Explicit Feedback Fast Track — direct save for "记住"/"always use" signals
+- Dream Prepare Merge — 4-phase logic, 3 LLM calls (orient+gather combined)
+- Typed Memory Candidate — confidence-based routing (explicit/observed auto-promote)
+- Extract Cursor Enhancement — reads from local cache, SDK fallback
+
+**Earlier fixes**
+- Confidence level mismatch — `uncertain: 0` added to `promotion.ts` priority map
+- `$id` uniqueness — session-specific URI in `capture.ts` and `extraction.ts`
+- `DreamMode` union type — type safety for `state.ts` and `health.ts`
+
+**Test growth:** 139 → 216 tests (+77), 27 files, 0 regressions
+
+### v0.1.0 — Initial Release
+
+- KAIROS extraction, two-stage recall, Dream consolidation, telemetry, memory pressure
+- 139 tests across 18 files

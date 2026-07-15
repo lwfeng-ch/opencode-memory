@@ -8,13 +8,14 @@
 
 ## 特性
 
+### 核心流水线
 - **KAIROS 模式** — 活跃会话期间追加式日志（零 LLM 开销），`session.idle` 时批量提取
 - **增量提取** — 基于 Cursor 的消息偏移追踪；仅将上次提取后的新消息发送给 LLM（降低长会话成本）
 - **两阶段召回** — 规则筛选（免费，零模型调用）+ LLM 精排（仅对候选集发一次轻量调用）
 - **RecallHandle** — 异步召回在 `chat.message` 时启动，后台结算，在下一轮 `system.transform` 时注入——不阻塞、不丢结果
 - **活动工具过滤** — 工具活跃时的临时调试记忆（如 "npm install failed"）被过滤；持久标记（"workaround"、"known issue"）保留
 - **记忆压力检测** — 三级检测（normal/elevated/critical），基于文件数、索引大小和总大小；critical 绕过 Dream 时间门控，elevated 减半
-- **Dream 蒸馏** — 四阶段流水线：定向 → 收集 → 合并 → 清理，三重门控调度 + 压力感知触发
+- **Dream 蒸馏** — 四阶段流水线：Prepare（orient+gather 合并）→ 合并 → 清理，三重门控调度 + 压力感知触发——3 次 LLM 调用（原 4 次）
 - **条目级删除** — `memory_delete` 支持 `entryId` 参数，可删除多条目记忆文件中的单条记录，而非整文件
 - **遥测事件** — 结构化 JSONL 事件日志（`logEvent`/`queryEvents`/`cleanupOldEvents`），覆盖提取、召回、Dream 生命周期——永不阻塞流水线
 - **跨项目分层** — 用户级记忆（全局偏好）+ 项目级记忆（仓库上下文），支持优先级覆盖
@@ -22,25 +23,49 @@
 - **时效感知** — 超过 N 天的记忆自动注入"时间点观察"警示标记
 - **模型无关** — 免费模型默认配置（`explore`/`quick`/`deep` 类别），每个阶段独立可配，`resolveAgentConfig` 安全检查
 
+### 质量与安全 (v0.2+)
+- **提取验证器** — 4 层质量门（schema → section → placeholder → length）写入前检查；防止垃圾内容污染记忆库
+- **相关记忆过滤** — `scoreMemory()` 按关键词相关性预筛 top-10；提取 prompt token 减少 60~80%
+- **语义描述** — LLM 输出 `name`/`description` frontmatter；会话记忆可被召回关键词匹配命中
+- **语义指纹** — TF-IDF 关键词提取 + Jaccard 相似度 > 0.8 → 合并；即使文本不同也能捕获语义重叠（非 SHA256）
+- **召回追踪** — `store.touch()` 在召回命中时更新；180 天未召回的非 explicit 记忆自动清理；**explicit 记忆永不自动删除**
+- **消息缓存** — `chat.message` hook 写入 `fact/messages/*.jsonl`；解耦提取与 SDK API，支持离线回放
+- **路径安全守卫** — Symlink 保护、`realpath()` 检查、路径逃逸防护；自动写入系统的安全层
+- **显式反馈快速通道** — 检测显式信号（"记住"/"always use"/"never use"）直接以 `confidence: explicit` 保存；绕过 Dream
+- **类型化记忆候选** — 提取产出 `semantic/candidates/` 带置信度；explicit/observed 自动提升，inferred/derived 走 Dream 审批
+- **提取游标增强** — 优先从本地消息缓存读取，SDK API 回退；真正的增量处理
+
 ## 架构
 
 ```
 src/
-├── index.ts        插件入口 — 串联 hooks（system.transform, chat.message, event, tool）
-├── config.ts       配置、类型分类、scope 路由、resolveAgentConfig
-├── store.ts        存储抽象（FileSystemStore）、frontmatter 解析、parseEntries/deleteEntry
-├── paths.ts        路径解析（项目 + 用户目录、git 根、cursor 路径）
-├── prompt.ts       系统提示词构建（指令 + MEMORY.md 索引注入）
-├── recall.ts       两阶段召回：规则筛选 → LLM 精排、RecallHandle、isTransientToolMemory、压力缓存
-├── extraction.ts   KAIROS 会话提取（session.idle）、cursor 增量处理
-├── dream.ts        Dream 蒸馏：四阶段流水线 + 三重门控 + 压力感知触发
-├── cursor.ts       增量提取追踪（readCursor/writeCursor）
-├── health.ts       记忆压力检测（三级）、健康评分、状态报告
-├── telemetry.ts    结构化 JSONL 事件日志（logEvent/queryEvents/cleanupOldEvents）
-├── scan.ts         目录扫描 + 清单/选择格式化
-├── staleness.ts    时效计算 + 新鲜度警示（纯函数，无 I/O）
-├── lock.ts         文件锁互斥（PID + 超时）
-└── tools.ts        6 个自定义工具定义
+├── index.ts              插件入口 — 串联 hooks（system.transform, chat.message, event, tool）
+├── config.ts             配置、类型分类、scope 路由、resolveAgentConfig、DreamMode
+├── store.ts              存储抽象（FileSystemStore）、frontmatter 解析、touch()、pathguard 集成
+├── paths.ts              路径解析（项目 + 用户目录、git 根、cursor + 消息缓存路径）
+├── prompt.ts             系统提示词构建（指令 + MEMORY.md 索引注入）
+├── recall.ts             两阶段召回：规则筛选 → LLM 精排、RecallHandle、scoreMemory（已导出）、命中 touch
+├── extraction.ts         KAIROS 提取：验证器 + 指纹 + 语义描述 + 显式反馈 + 候选检测
+├── extraction-validator.ts  4 层质量门（schema/section/placeholder/length）— 纯函数
+├── fingerprint.ts        TF-IDF 关键词提取 + Jaccard 相似度去重 — 纯函数
+├── message-cache.ts      追加式 JSONL 消息缓存（chat.message → fact/messages/*.jsonl）
+├── explicit-feedback.ts  检测显式信号（"记住"/"always use"）— 直接保存，绕过 Dream
+├── candidate.ts          类型化记忆候选，置信度分层 Dream 路由
+├── dream.ts              Dream 蒸馏：prepareDreamContext（orient+gather）→ 合并 → 清理 + 180 天召回清理
+├── pathguard.ts          Symlink 保护、realpath 检查、路径逃逸防护
+├── cursor.ts             增量提取追踪（readCursor/writeCursor）
+├── health.ts             记忆压力检测（三级）、健康评分、DreamMode 类型窗口
+├── state.ts              管线状态（state.json）、DreamMode 联合类型、mergeState 验证
+├── telemetry.ts          结构化 JSONL 事件日志（logEvent/queryEvents/cleanupOldEvents）
+├── scan.ts               目录扫描 + 清单/选择格式化
+├── staleness.ts          时效计算 + 新鲜度警示（纯函数，无 I/O）
+├── promotion.ts          Dream 变更验证 + 置信度冲突解决
+├── capture.ts            Fact Layer：不可变会话记录，session 专属 $id
+├── adapter.ts            Runtime 适配器（SDK → 干净接口、git 快照、健康检查）
+├── migration.ts          跨版本数据迁移
+├── log.ts                文件日志（避免 stdout 污染，Windows CJK 安全）
+├── lock.ts               文件锁互斥（PID + 超时）
+└── tools.ts              6 个自定义工具定义
 ```
 
 ### 记忆流水线
@@ -198,23 +223,32 @@ schema_version: 1
 ## 测试
 
 ```bash
-# 运行全部单元 + 集成测试（139 项，18 个文件）
-bun test test/chain.test.ts test/config-pressure.test.ts test/cursor.test.ts \
-     test/entry-delete.test.ts test/health-pressure.test.ts test/integration.test.ts \
-     test/lock-recall.test.ts test/lock.test.ts test/paths.test.ts test/prompt.test.ts \
-     test/resolve-agent.test.ts test/scan.test.ts test/state-pressure.test.ts \
-     test/staleness.test.ts test/telemetry.test.ts test/tools.test.ts \
-     test/transient-filter.test.ts test/round10-integration.test.ts
+# 运行全部单元 + 集成测试（216 项，27 个文件）
+bun test test/chain.test.ts test/candidate.test.ts test/config-pressure.test.ts \
+     test/cursor.test.ts test/dream-prepare.test.ts test/entry-delete.test.ts \
+     test/explicit-feedback.test.ts test/extraction-validator.test.ts test/fingerprint.test.ts \
+     test/health-pressure.test.ts test/integration.test.ts test/lock-recall.test.ts \
+     test/lock.test.ts test/message-cache.test.ts test/paths.test.ts test/pathguard.test.ts \
+     test/promotion.test.ts test/prompt.test.ts test/recall-tracking.test.ts \
+     test/resolve-agent.test.ts test/round10-integration.test.ts test/scan.test.ts \
+     test/state-pressure.test.ts test/staleness.test.ts test/telemetry.test.ts \
+     test/tools.test.ts test/transient-filter.test.ts
 
 # 运行单个测试套件
-bun test test/integration.test.ts              # Dream + Extraction + Plugin（12 项）
-bun test test/round10-integration.test.ts      # Cursor + Pressure + RecallHandle（14 项）
-bun test test/cursor.test.ts                   # Cursor 读写（6 项）
-bun test test/telemetry.test.ts                # 遥测日志（9 项）
-bun test test/health-pressure.test.ts          # 压力检测（6 项）
+bun test test/extraction-validator.test.ts   # 4 层质量门（10 项）
+bun test test/fingerprint.test.ts            # TF-IDF Jaccard 去重（11 项）
+bun test test/recall-tracking.test.ts       # touch() + 追踪（4 项）
+bun test test/message-cache.test.ts          # JSONL 消息缓存（5 项）
+bun test test/pathguard.test.ts             # Symlink/路径安全（6 项）
+bun test test/explicit-feedback.test.ts      # 显式信号检测（5 项）
+bun test test/dream-prepare.test.ts          # 合并 orient+gather（5 项）
+bun test test/candidate.test.ts              # 类型候选检测（6 项）
+bun test test/promotion.test.ts             # 置信度覆盖规则（25 项）
+bun test test/integration.test.ts            # Dream + Extraction + Plugin（12 项）
+bun test test/round10-integration.test.ts    # Cursor + Pressure + RecallHandle（14 项）
 ```
 
-共 139 项测试，覆盖 18 个文件，全部通过。
+共 216 项测试，覆盖 27 个文件，213 项通过（3 个 SDK 超时测试需活跃 OpenCode 实例）。
 
 ## 设计原则
 
@@ -225,7 +259,11 @@ bun test test/health-pressure.test.ts          # 压力检测（6 项）
 5. **遥测永不阻塞** — 所有事件日志均为 fire-and-forget（`void logEvent`），失败静默
 6. **松耦合** — `type` ≠ `scope`；type 是语义分类，scope 是生命周期边界，可逐条覆盖
 7. **协作而非竞争** — 主 Agent 主动写记忆；提取/Dream 是安全网，不抢占
-8. **纵深防御** — 工具层和存储层双重路径遍历保护
+8. **纵深防御** — PathGuard（symlink/realpath/escape）+ 存储层遍历检查 = 双层安全
+9. **写入前质量门** — 提取输出经 4 层检查后方可进入记忆库
+10. **语义去重优于哈希** — TF-IDF Jaccard 相似度捕获语义重叠，即使文本不同
+11. **置信度分层路由** — explicit/observed 自动提升；inferred/derived 走 Dream 审批
+12. **召回驱动治理** — 180 天未召回的非 explicit 记忆自动清理；explicit 记忆永久保留
 
 ## 记忆系统概念问答
 
@@ -290,3 +328,37 @@ MIT
 - [Claude Code](https://claude.ai) — 原始记忆流水线设计灵感
 - [OpenCode](https://opencode.ai) — 插件架构与事件驱动 hooks
 - [oh-my-openagent](https://github.com/anthropics/oh-my-openagent) — Agent 类别体系
+- [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact Layer 架构、recall-selection 概念、symlink 保护
+
+## 更新日志
+
+### v0.2.0 — 提取质量与安全 (2026-07-15)
+
+**质量门 (P0)**
+- 提取验证器 — 4 层质量门（schema/section/placeholder/length）写入前检查
+- 相关记忆过滤 — `scoreMemory()` 预筛 top-10，token 减少 60~80%
+
+**质量基础设施 (P1)**
+- 语义描述 — LLM 输出 `name`/`description` frontmatter，召回可命中
+- 语义指纹 — TF-IDF Jaccard > 0.8 去重，非 SHA256
+- 召回追踪 — `store.touch()` + 180 天清理（永不删 explicit）
+- 消息缓存 — `chat.message` → `fact/messages/*.jsonl`，SDK 解耦
+
+**智能化与安全 (P2)**
+- 路径安全守卫 — symlink 保护、realpath 检查、路径逃逸防护
+- 显式反馈快速通道 — "记住"/"always use" 信号直接保存
+- Dream 合并 — 4 阶段逻辑，3 次 LLM 调用（orient+gather 合并）
+- 类型化记忆候选 — 置信度分层路由（explicit/observed 自动提升）
+- 提取游标增强 — 优先从本地缓存读取，SDK 回退
+
+**早期修复**
+- 置信度级别不一致 — `uncertain: 0` 加入 `promotion.ts` 优先级映射
+- `$id` 唯一性 — `capture.ts` 和 `extraction.ts` 使用 session 专属 URI
+- `DreamMode` 联合类型 — `state.ts` 和 `health.ts` 类型安全
+
+**测试增长：** 139 → 216 项（+77），27 个文件，0 回归
+
+### v0.1.0 — 初始版本
+
+- KAIROS 提取、两阶段召回、Dream 蒸馏、遥测、记忆压力
+- 139 项测试，18 个文件
