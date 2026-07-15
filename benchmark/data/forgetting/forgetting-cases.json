@@ -1,0 +1,21 @@
+[
+  {
+    "id": "forgetting-001",
+    "version": "0.3.0",
+    "suite": "forgetting",
+    "input": {
+      "timeline": [
+        { "memory": "tensorflow_usage.md", "confidence": "explicit", "content": "User uses TensorFlow for ML.", "recall_count": 0, "age_days": 200 },
+        { "memory": "pytorch_usage.md", "confidence": "explicit", "content": "User switched to PyTorch for ML.", "recall_count": 5, "age_days": 10 }
+      ],
+      "deprecation_signal": "I don't use TensorFlow anymore, I switched to PyTorch"
+    },
+    "expected": {
+      "deprecated": 1,
+      "should_deprecate": 1
+    },
+    "metadata": {
+      "description": "Old TF memory should be deprecated when user switches to PyTorch"
+    }
+  }
+]

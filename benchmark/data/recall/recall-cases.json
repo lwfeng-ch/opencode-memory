@@ -1,0 +1,54 @@
+[
+  {
+    "id": "recall-001",
+    "version": "0.3.0",
+    "suite": "recall",
+    "input": {
+      "query": "training parameters for YOLO GPU",
+      "memories": [
+        { "filename": "gpu_gtx1650.md", "header": { "description": "GTX1650 GPU for training", "type": "user", "confidence": "explicit" } },
+        { "filename": "project_yolov11.md", "header": { "description": "YOLOv11 training project", "type": "project", "confidence": "explicit" } },
+        { "filename": "weather.md", "header": { "description": "Sunny today", "type": "reference", "confidence": "inferred" } }
+      ]
+    },
+    "expected": ["gpu_gtx1650.md", "project_yolov11.md"],
+    "metadata": {
+      "source": "real-session",
+      "description": "Training query expects GPU + project recall, not weather"
+    }
+  },
+  {
+    "id": "recall-002",
+    "version": "0.3.0",
+    "suite": "recall",
+    "input": {
+      "query": "user preferences for programming language",
+      "memories": [
+        { "filename": "python_pref.md", "header": { "description": "User prefers Python", "type": "feedback", "confidence": "explicit" } },
+        { "filename": "gpu.md", "header": { "description": "GTX1650", "type": "user", "confidence": "explicit" } },
+        { "filename": "deadline.md", "header": { "description": "Project deadline next week", "type": "project", "confidence": "explicit" } }
+      ]
+    },
+    "expected": ["python_pref.md"],
+    "metadata": {
+      "description": "Language preference query expects only Python memory"
+    }
+  },
+  {
+    "id": "recall-003",
+    "version": "0.3.0",
+    "suite": "recall",
+    "input": {
+      "query": "project deadline schedule",
+      "memories": [
+        { "filename": "deadline.md", "header": { "description": "Project deadline next week", "type": "project", "confidence": "explicit" } },
+        { "filename": "weather.md", "header": { "description": "Sunny today", "type": "reference", "confidence": "inferred" } },
+        { "filename": "python.md", "header": { "description": "Python 3.10", "type": "user", "confidence": "explicit" } }
+      ]
+    },
+    "expected": ["deadline.md"],
+    "metadata": {
+      "description": "Deadline query expects only project memory"
+    }
+  }
+]

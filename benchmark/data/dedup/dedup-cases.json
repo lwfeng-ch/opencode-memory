@@ -1,0 +1,63 @@
+[
+  {
+    "id": "dedup-001",
+    "version": "0.3.0",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User prefers Python for AI development and machine learning projects.",
+        "User prefers Python for machine learning and AI development projects.",
+        "User has a GTX1650 GPU for rendering."
+      ]
+    },
+    "expected": {
+      "merged_count": 1,
+      "remaining": ["User prefers Python for AI development and machine learning projects.", "User has a GTX1650 GPU for rendering."]
+    },
+    "metadata": {
+      "description": "Near-identical pair (word order swap) + one unique (GPU)"
+    }
+  },
+  {
+    "id": "dedup-002",
+    "version": "0.3.0",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "The user is a senior Go engineer who prefers backend development.",
+        "The weather today is sunny with a high of 25 degrees.",
+        "The project uses React and TypeScript for the frontend."
+      ]
+    },
+    "expected": {
+      "merged_count": 0,
+      "remaining": [
+        "The user is a senior Go engineer who prefers backend development.",
+        "The weather today is sunny with a high of 25 degrees.",
+        "The project uses React and TypeScript for the frontend."
+      ]
+    },
+    "metadata": {
+      "description": "Three unrelated memories — no duplicates expected"
+    }
+  },
+  {
+    "id": "dedup-003",
+    "version": "0.3.0",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User uses Python 3.10 for development purposes.",
+        "User uses Python 3.10 for development purposes.",
+        "User has a GTX1650 graphics card."
+      ]
+    },
+    "expected": {
+      "merged_count": 1,
+      "remaining": ["User uses Python 3.10 for development purposes.", "User has a GTX1650 graphics card."]
+    },
+    "metadata": {
+      "description": "Exact duplicate pair + one unique"
+    }
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "id": "conflict-001",
+    "version": "0.3.0",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "filename": "python_old.md", "confidence": "inferred", "content": "User uses Python 3.9 for development." },
+        { "filename": "python_new.md", "confidence": "explicit", "content": "User upgraded to Python 3.12." }
+      ]
+    },
+    "expected": "python_new.md",
+    "metadata": {
+      "description": "Python version conflict: explicit 3.12 should override inferred 3.9"
+    }
+  },
+  {
+    "id": "conflict-002",
+    "version": "0.3.0",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "filename": "tensorflow.md", "confidence": "inferred", "content": "User uses TensorFlow for ML." },
+        { "filename": "pytorch.md", "confidence": "explicit", "content": "User switched to PyTorch for ML." }
+      ]
+    },
+    "expected": "pytorch.md",
+    "metadata": {
+      "description": "Framework switch: explicit PyTorch should override inferred TensorFlow"
+    }
+  }
+]

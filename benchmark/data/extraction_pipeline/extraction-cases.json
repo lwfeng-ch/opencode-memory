@@ -1,0 +1,42 @@
+[
+  {
+    "id": "extraction-001",
+    "version": "0.3.0",
+    "suite": "extraction_pipeline",
+    "input": {
+      "conversation": [
+        { "role": "user", "content": "I'm using YOLOv11 for windmill blade defect detection." },
+        { "role": "user", "content": "My GPU is a GTX1650." }
+      ]
+    },
+    "expected": {
+      "fields": {
+        "project": "YOLOv11",
+        "domain": "windmill",
+        "gpu": "GTX1650"
+      }
+    },
+    "metadata": {
+      "description": "Extract project, domain, and GPU from conversation"
+    }
+  },
+  {
+    "id": "extraction-002",
+    "version": "0.3.0",
+    "suite": "extraction_pipeline",
+    "input": {
+      "conversation": [
+        { "role": "user", "content": "Remember that I prefer Python over JavaScript." }
+      ]
+    },
+    "expected": {
+      "fields": {
+        "preference": "Python",
+        "dislikes": "JavaScript"
+      }
+    },
+    "metadata": {
+      "description": "Extract explicit language preference"
+    }
+  }
+]

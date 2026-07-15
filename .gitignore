@@ -49,3 +49,9 @@ AGENTS.md
 docs/
 qwen-code-main/
 memory.config.json
+
+# Generated reports
+reports/
+
+# Bun lockfile (use yarn or pnpm)
+bun.lock

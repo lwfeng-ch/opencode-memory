@@ -11,9 +11,16 @@
     "@opencode-ai/plugin": "^1.14.48",
     "zod": "^4.0.0"
   },
+  "scripts": {
+    "audit": "bun run scripts/audit-cli.ts",
+    "benchmark": "bun run scripts/benchmark-cli.ts",
+    "benchmark:mock": "bun run scripts/benchmark-cli.ts",
+    "benchmark:adversarial": "BENCHMARK_MODE=adversarial bun run scripts/benchmark-cli.ts"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "bun-types": "latest",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   }
 }
