@@ -35,6 +35,12 @@ Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architectur
 - **Typed Memory Candidate** — Extraction produces `semantic/candidates/` with confidence levels; explicit/observed auto-promote, inferred/derived go through Dream review
 - **Extract Cursor Enhancement** — Reads from local message cache first, falls back to SDK API; true incremental processing
 
+### Observability & Evaluation (v0.3+)
+- **Memory Audit** — `bun run audit` scans memory directory for quality issues (truncated descriptions, missing fields, empty bodies), duplicates (TF-IDF Jaccard), conflicts (version/technology-switch detection), and staleness (180-day never-recalled). Read-only — never modifies files.
+- **Benchmark Framework** — `bun run benchmark` runs 5 test suites (Dedup, Recall, Conflict, ExtractionPipeline, Forgetting) in Mock mode with strict + adversarial dual-mode executors. Reports JSON/Markdown/Console.
+- **Evaluation Layer** — Independent evaluation primitives (fingerprint, scoring, comparison, metrics, types) shared by Audit and Benchmark. No circular dependencies.
+- **CLI Tools** — `scripts/audit-cli.ts` and `scripts/benchmark-cli.ts` with `--json`, `--scope`, `--suite`, `--format` flags
+
 ## Architecture
 
 ```
@@ -44,10 +50,23 @@ src/
 ├── store.ts              Storage abstraction (FileSystemStore), frontmatter parser, touch(), pathguard integration
 ├── paths.ts              Path resolution (project + user dirs, git root, cursor + message cache paths)
 ├── prompt.ts             System prompt builder (instructions + MEMORY.md index injection)
-├── recall.ts             Two-stage recall: rule filter → LLM rerank, RecallHandle, scoreMemory (exported), touch on hit
+├── recall.ts             Two-stage recall: rule filter → LLM rerank, RecallHandle (scoreMemory re-exported from evaluation)
 ├── extraction.ts         KAIROS extraction: validator + fingerprint + semantic description + explicit feedback + candidates
 ├── extraction-validator.ts  4-layer quality gate (schema/section/placeholder/length) — pure, no I/O
-├── fingerprint.ts        TF-IDF keyword extraction + Jaccard similarity for semantic dedup — pure
+├── evaluation/           Shared evaluation primitives (v0.3+)
+│   ├── types.ts          EvaluationResult, EvaluationContext — unified across audit/benchmark
+│   ├── metrics.ts        Pure math: precision, recallAtK, f1, reductionRate
+│   ├── fingerprint.ts    TF-IDF keyword extraction + Jaccard similarity (migrated from src/)
+│   ├── scoring.ts        scoreMemory extracted from recall.ts — keyword matching + type bonus + recency
+│   └── comparison.ts     SemanticComparator<T> + TokenJaccardComparator + ArrayOverlapComparator
+├── audit/                Read-only memory health scanner (v0.3+)
+│   ├── index.ts          MemoryAuditService — plugin-pattern analyzer orchestration
+│   ├── report.ts         AuditReport generation + JSON/Markdown/Console formatters
+│   └── analyzer/
+│       ├── duplicate.ts  TF-IDF Jaccard >0.8 pair detection (reuses evaluation/fingerprint)
+│       ├── conflict.ts   Pair-wise topic similarity + version/tech-switch conflict detection
+│       ├── quality.ts    Frontmatter completeness, truncated description, empty body
+│       └── staleness.ts  180-day prune rule, explicit memories never stale
 ├── message-cache.ts      Append-only JSONL message cache (chat.message → fact/messages/*.jsonl)
 ├── explicit-feedback.ts  Detects explicit signals ("记住"/"always use") — direct save, bypasses Dream
 ├── candidate.ts          Typed memory candidates with confidence-based Dream routing
@@ -65,7 +84,21 @@ src/
 ├── migration.ts          Cross-version data migration
 ├── log.ts                File logger (avoids stdout pollution, Windows CJK safe)
 ├── lock.ts               File-based mutual exclusion (PID + stale timeout)
-└── tools.ts              6 custom tool definitions for the main agent
+├── tools.ts              6 custom tool definitions for the main agent
+└── fingerprint.ts        Re-export shim → evaluation/fingerprint.ts (deprecated, use new path)
+
+benchmark/                Project-root test harness (not in src/, not packaged)
+├── runner.ts             BenchmarkRunner — orchestrates case execution via executor
+├── dataset.ts            Dataset loader (JSON case files from data/)
+├── metrics.ts            Metric<T> implementations (Dedup, Recall@K, Conflict, F1, Obsolete)
+├── reporter.ts           BenchmarkReport generation → reports/benchmark/latest.json
+├── executor/mock.ts      Mock executor: strict (returns expected) + adversarial (returns garbage)
+├── suites/               5 suite implementations (dedup, recall, conflict, extraction_pipeline, forgetting)
+└── data/                 11 benchmark cases with real-session-style data
+
+scripts/                  CLI entry points (v0.3+)
+├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
+└── benchmark-cli.ts      bun run benchmark [--suite X] [--json] [--adversarial]
 ```
 
 ### Memory Pipeline
@@ -223,32 +256,53 @@ Memory body content...
 ## Testing
 
 ```bash
-# Run all unit + integration tests (216 tests, 27 files)
+# Run all unit + integration tests (258 tests, 34 files)
 bun test test/chain.test.ts test/candidate.test.ts test/config-pressure.test.ts \
      test/cursor.test.ts test/dream-prepare.test.ts test/entry-delete.test.ts \
-     test/explicit-feedback.test.ts test/extraction-validator.test.ts test/fingerprint.test.ts \
+     test/explicit-feedback.test.ts test/extraction-validator.test.ts \
      test/health-pressure.test.ts test/integration.test.ts test/lock-recall.test.ts \
      test/lock.test.ts test/message-cache.test.ts test/paths.test.ts test/pathguard.test.ts \
      test/promotion.test.ts test/prompt.test.ts test/recall-tracking.test.ts \
      test/resolve-agent.test.ts test/round10-integration.test.ts test/scan.test.ts \
      test/state-pressure.test.ts test/staleness.test.ts test/telemetry.test.ts \
-     test/tools.test.ts test/transient-filter.test.ts
+     test/tools.test.ts test/transient-filter.test.ts \
+     test/evaluation/fingerprint.test.ts test/evaluation/scoring.test.ts \
+     test/audit/duplicate.test.ts test/audit/conflict.test.ts \
+     test/audit/quality.test.ts test/audit/staleness.test.ts \
+     test/benchmark/runner.test.ts test/benchmark/metrics.test.ts
 
 # Run individual suites
 bun test test/extraction-validator.test.ts   # 4-layer quality gate (10 tests)
-bun test test/fingerprint.test.ts            # TF-IDF Jaccard dedup (11 tests)
-bun test test/recall-tracking.test.ts       # touch() + tracking (4 tests)
+bun test test/evaluation/fingerprint.test.ts  # TF-IDF Jaccard dedup (11 tests)
+bun test test/evaluation/scoring.test.ts     # scoreMemory keyword match (8 tests)
+bun test test/recall-tracking.test.ts        # touch() + tracking (4 tests)
 bun test test/message-cache.test.ts          # JSONL message cache (5 tests)
-bun test test/pathguard.test.ts             # Symlink/path security (6 tests)
+bun test test/pathguard.test.ts              # Symlink/path security (6 tests)
 bun test test/explicit-feedback.test.ts      # Explicit signal detection (5 tests)
 bun test test/dream-prepare.test.ts          # Combined orient+gather (5 tests)
 bun test test/candidate.test.ts              # Typed candidate detection (6 tests)
 bun test test/promotion.test.ts             # Confidence override rules (25 tests)
+bun test test/audit/duplicate.test.ts        # Duplicate analyzer (4 tests)
+bun test test/audit/conflict.test.ts         # Conflict analyzer (5 tests)
+bun test test/audit/quality.test.ts          # Quality analyzer (5 tests)
+bun test test/audit/staleness.test.ts        # Staleness analyzer (4 tests)
+bun test test/benchmark/runner.test.ts       # Benchmark runner (4 tests)
+bun test test/benchmark/metrics.test.ts      # Benchmark metrics (12 tests)
 bun test test/integration.test.ts            # Dream + Extraction + Plugin (12 tests)
 bun test test/round10-integration.test.ts    # Cursor + Pressure + RecallHandle (14 tests)
+
+# Audit CLI — scan memory health
+bun run audit                                # console output
+bun run audit --json                         # JSON to stdout
+bun run audit --scope user                   # scan user scope only
+
+# Benchmark CLI — run evaluation suites
+bun run benchmark                            # all suites, mock mode
+bun run benchmark --suite dedup              # specific suite only
+bun run benchmark --adversarial              # adversarial mock (tests defense)
 ```
 
-216 tests total across 27 files, 213 passing (3 SDK timeout tests require live OpenCode instance).
+258 tests total across 34 files, 257 passing (1 C1 timeout requires live OpenCode instance).
 
 ## Design Principles
 
@@ -264,6 +318,9 @@ bun test test/round10-integration.test.ts    # Cursor + Pressure + RecallHandle 
 10. **Semantic dedup over hash** — TF-IDF Jaccard similarity catches semantic overlap even when exact text differs
 11. **Confidence-based routing** — Explicit/observed memories auto-promote; inferred/derived go through Dream review
 12. **Recall-driven governance** — 180-day prune rule for unrecalled non-explicit memories; explicit memories are permanent
+13. **Observability over assumptions** — Audit discovers real problems from actual memory state; confirmed issues become benchmark cases (v0.3+)
+14. **Evaluation layer independence** — Shared evaluation primitives (fingerprint, scoring, comparison) serve audit, benchmark, and future modules without circular deps (v0.3+)
+15. **CLI ≠ Library** — CLI scripts are thin entry points; runners/services are library code, never the other way around (v0.3+)
 
 ## Memory System Conceptual Q&A
 
@@ -331,6 +388,40 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.3.0 — Memory Observability & Evaluation Foundation (2026-07-15)
+
+**Evaluation Layer**
+- Evaluation primitives (types, metrics, fingerprint, scoring, comparison) as independent shared layer
+- `fingerprint.ts` migrated from `src/` to `src/evaluation/` (re-export shim for backward compat)
+- `scoreMemory` extracted from `recall.ts` to `src/evaluation/scoring.ts`
+- `SemanticComparator<T>` generic interface + `TokenJaccardComparator` + `ArrayOverlapComparator`
+
+**Audit Module**
+- `MemoryAuditService` with plugin-pattern analyzer registration
+- 4 analyzers: Duplicate (TF-IDF), Conflict (pair-wise + version/tech-switch), Quality (frontmatter), Staleness (180-day)
+- Read-only constraint: never modifies memory files
+- Report generation: JSON/Markdown/Console with severity scoring
+
+**Benchmark Framework**
+- `BenchmarkRunner` + `BenchmarkExecutor` strategy pattern (runner = orchestration, executor = per-case)
+- `MockExecutor` with strict (returns expected) + adversarial (returns garbage) dual mode
+- 5 test suites: Dedup, Recall, Conflict, ExtractionPipeline, Forgetting
+- 11 benchmark cases with real-session-style data
+- Report with environment metadata + baseline support
+
+**CLI Tools**
+- `bun run audit` — scan memory health, output findings + suggestions
+- `bun run benchmark` — run evaluation suites in mock mode
+- Flags: `--json`, `--scope`, `--suite`, `--format`, `--adversarial`
+
+**Fixes**
+- `store.ts` LSP type annotation fix (recall_count, last_recalled_at in inline type)
+- Conflict analyzer precision fix (101 false positives → 0, pair-wise + dedup)
+- `vitest` added to devDependencies (LSP type resolution for test files)
+- N-issue fixes: `uncertain:0` in promotion, `$id` with sessionId, `DreamMode` union type
+
+**Test growth:** 216 → 258 tests (+42), 34 files, 0 regressions
 
 ### v0.2.0 — Extraction Quality & Security (2026-07-15)
 

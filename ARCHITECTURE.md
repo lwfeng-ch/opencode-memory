@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.1.0 | **Last Updated**: 2026-07-14 | **Tests**: 139 pass / 18 files
+> **Version**: 0.3.0 | **Last Updated**: 2026-07-15 | **Tests**: 258 pass / 34 files
 
 ## Table of Contents
 
@@ -14,9 +14,10 @@
 8. [Pipeline Stages](#8-pipeline-stages)
 9. [Optimization Features (Rounds 1-10)](#9-optimization-features-rounds-1-10)
 10. [Telemetry & Observability](#10-telemetry--observability)
-11. [Testing](#11-testing)
-12. [Design Principles](#12-design-principles)
-13. [Known Limitations](#13-known-limitations)
+11. [Audit & Benchmark (v0.3+)](#11-audit--benchmark-v03)
+12. [Testing](#12-testing)
+13. [Design Principles](#13-design-principles)
+14. [Known Limitations](#14-known-limitations)
 
 ---
 
@@ -71,6 +72,20 @@
 │  │                    Observability Layer                           │  │
 │  │  (state.ts, telemetry.ts, log.ts, health.ts)                    │  │
 │  │  Pipeline state, JSONL events, health score, file logging       │  │
+│  └──────────────────────────┬─────────────────────────────────────┘  │
+│                             │                                        │
+│  ┌──────────────────────────┴─────────────────────────────────────┐  │
+│  │              Evaluation Layer (v0.3+)                            │  │
+│  │  (evaluation/: fingerprint, scoring, comparison, metrics, types)│  │
+│  │  Shared evaluation primitives — no circular deps               │  │
+│  └──────────────────────────┬─────────────────────────────────────┘  │
+│                             │                                        │
+│  ┌──────────────────────────┴─────────────────────────────────────┐  │
+│  │              Audit & Benchmark (v0.3+)                           │  │
+│  │  (audit/: 4 analyzers + MemoryAuditService)                     │  │
+│  │  (benchmark/: runner, executor, suites, metrics, reporter)      │  │
+│  │  (scripts/: audit-cli, benchmark-cli)                           │  │
+│  │  Read-only health scan + pipeline logic evaluation              │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -209,7 +224,10 @@ index.ts
   ├── paths.ts (getMemoryDir, getUserMemoryDir)
   ├── prompt.ts (buildMemoryPrompt, buildScopedMemoryPrompt)
   ├── recall.ts (recallMemories, recallMemoriesMultiScope, RecallHandle)
+  │     └── evaluation/scoring.ts (scoreMemory — extracted, re-exported)
   ├── extraction.ts (extractSessionMemory)
+  │     ├── evaluation/scoring.ts (scoreMemory)
+  │     ├── evaluation/fingerprint.ts (shouldMerge)
   │     ├── cursor.ts (readCursor, writeCursor)
   │     ├── telemetry.ts (logEvent)
   │     └── config.ts (resolveAgentConfig)
@@ -225,6 +243,33 @@ index.ts
   ├── state.ts (updateState, recordEvent)
   ├── log.ts (initLogger, error)
   └── migration.ts (runMigrationIfNeeded)
+
+evaluation/ (shared primitives — v0.3+)
+  ├── types.ts          EvaluationResult, EvaluationContext
+  ├── metrics.ts        precision, recallAtK, f1, reductionRate (pure math)
+  ├── fingerprint.ts    TF-IDF + Jaccard (migrated from src/)
+  ├── scoring.ts        scoreMemory (extracted from recall.ts)
+  └── comparison.ts      SemanticComparator<T> + TokenJaccardComparator
+
+audit/ (read-only health scanner — v0.3+)
+  ├── index.ts          MemoryAuditService + 4 analyzer registration
+  ├── analyzer/
+  │   ├── duplicate.ts  → evaluation/fingerprint.ts
+  │   ├── conflict.ts   → promotion.ts (canOverride)
+  │   ├── quality.ts   → store.ts (parseFrontmatter)
+  │   └── staleness.ts  → staleness.ts (memoryAgeDays)
+  └── report.ts         JSON/Markdown/Console formatters
+
+benchmark/ (test harness — v0.3+, project root)
+  ├── runner.ts         → metrics.ts (getMetricForSuite)
+  ├── dataset.ts        loads JSON cases from data/
+  ├── executor/mock.ts  strict + adversarial dual mode
+  ├── suites/           5 suite implementations
+  └── reporter.ts       BenchmarkReport generation
+
+scripts/ (CLI — v0.3+)
+  ├── audit-cli.ts      → audit/index.ts (createDefaultAuditService)
+  └── benchmark-cli.ts  → benchmark/runner.ts + dataset.ts + executor/mock.ts
 ```
 
 ---
@@ -238,28 +283,59 @@ opencode-memory/
 ├── src/
 │   ├── index.ts          Plugin entry (448 lines)
 │   ├── config.ts         Configuration + resolveAgentConfig (~650 lines)
-│   ├── store.ts          FileSystemStore + parseEntries/deleteEntry (~280 lines)
+│   ├── store.ts          FileSystemStore + parseEntries/deleteEntry (~320 lines)
 │   ├── paths.ts          Path resolution (136 lines)
 │   ├── prompt.ts         System prompt builder (~780 lines)
-│   ├── recall.ts         Two-stage recall + RecallHandle + transient filter (~720 lines)
+│   ├── recall.ts         Two-stage recall + RecallHandle + transient filter (~670 lines)
 │   ├── extraction.ts     KAIROS extraction + cursor integration (~930 lines)
 │   ├── dream.ts          Dream consolidation + pressure-aware (~770 lines)
+│   ├── extraction-validator.ts  4-layer quality gate (pure, no I/O)
+│   ├── evaluation/       Shared evaluation primitives (v0.3+)
+│   │   ├── types.ts      EvaluationResult, EvaluationContext
+│   │   ├── metrics.ts    precision/recallAtK/f1/reductionRate (pure math)
+│   │   ├── fingerprint.ts  TF-IDF + Jaccard (migrated from src/)
+│   │   ├── scoring.ts    scoreMemory extracted from recall.ts
+│   │   └── comparison.ts  SemanticComparator<T> + implementations
+│   ├── audit/            Read-only memory health scanner (v0.3+)
+│   │   ├── index.ts      MemoryAuditService + analyzer registration
+│   │   ├── report.ts     AuditReport generation + formatters
+│   │   └── analyzer/
+│   │       ├── duplicate.ts   TF-IDF Jaccard >0.8 pair detection
+│   │       ├── conflict.ts    Version/tech-switch conflict detection
+│   │       ├── quality.ts     Frontmatter completeness + content checks
+│   │       └── staleness.ts   180-day prune rule, explicit never stale
+│   ├── message-cache.ts  Append-only JSONL message cache
+│   ├── explicit-feedback.ts  Explicit signal detection ("记住"/"always use")
+│   ├── candidate.ts      Typed memory candidates, confidence routing
+│   ├── pathguard.ts      Symlink protection, realpath, path escape
 │   ├── cursor.ts         Incremental cursor (58 lines)
 │   ├── health.ts         Pressure detection + health score (359 lines)
 │   ├── telemetry.ts      JSONL event logging (134 lines)
 │   ├── scan.ts           Directory scanning + formatting (160 lines)
 │   ├── staleness.ts      Age computation (76 lines)
 │   ├── lock.ts           File-based mutex (138 lines)
-│   ├── tools.ts          9 custom tools (~570 lines)
+│   ├── tools.ts          6 custom tools (~570 lines)
 │   ├── adapter.ts        Runtime adapter (~430 lines)
 │   ├── capture.ts        Fact Layer capture (~220 lines)
 │   ├── state.ts          Pipeline state (236 lines)
 │   ├── log.ts            File logger (133 lines)
-│   ├── promotion.ts      Staging → promotion (~380 lines)
-│   └── migration.ts      v1 → v2 migration (~170 lines)
-├── test/                 18 test files (139 tests)
+│   ├── promotion.ts      Staging → promotion (~430 lines)
+│   ├── migration.ts      v1 → v2 migration (~170 lines)
+│   └── fingerprint.ts    Re-export shim → evaluation/fingerprint.ts (deprecated)
+├── benchmark/            Test harness (v0.3+, not in src/)
+│   ├── runner.ts         BenchmarkRunner + executor strategy
+│   ├── dataset.ts        JSON case loader
+│   ├── metrics.ts        Metric<T> implementations
+│   ├── reporter.ts       BenchmarkReport generation
+│   ├── executor/mock.ts  strict + adversarial mock
+│   ├── suites/           5 suites (dedup, recall, conflict, extraction_pipeline, forgetting)
+│   └── data/             11 benchmark cases (5 suites)
+├── scripts/              CLI entry points (v0.3+)
+│   ├── audit-cli.ts      bun run audit
+│   └── benchmark-cli.ts  bun run benchmark
+├── test/                 34 test files (258 tests)
 ├── memory.config.example.json   Configuration template
-├── package.json          2 dependencies: @opencode-ai/plugin, zod
+├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config
 ```
 
@@ -605,12 +681,49 @@ type TelemetryEventType =
 
 ---
 
-## 11. Testing
+## 11. Audit & Benchmark (v0.3+)
+
+### Memory Audit
+
+`bun run audit` scans the memory directory for quality, duplicate, conflict, and staleness issues.
+
+**4 Analyzers:**
+
+| Analyzer | Reuses | Detects |
+|----------|--------|---------|
+| Duplicate | `evaluation/fingerprint.ts` | TF-IDF Jaccard >0.8 pair detection |
+| Conflict | `promotion.ts` canOverride | Version number / technology switch conflicts |
+| Quality | `store.ts` parseFrontmatter | Missing fields, truncated descriptions, empty bodies |
+| Staleness | `staleness.ts` memoryAgeDays | 180-day never-recalled non-explicit memories |
+
+**Constraint:** Audit is READ-ONLY — never modifies or deletes memory files. Repair is v0.4.0.
+
+### Benchmark Framework
+
+`bun run benchmark` runs 5 test suites in Mock mode (no LLM calls):
+
+| Suite | Metric | Tests |
+|-------|--------|-------|
+| Dedup | ReductionRate | 3 cases |
+| Recall | Recall@K | 3 cases |
+| Conflict | ConflictResolutionRate | 2 cases |
+| ExtractionPipeline | ExtractionF1 | 2 cases |
+| Forgetting | ObsoleteRate | 1 case |
+
+**Mock Executor dual mode:**
+- **Strict**: returns expected → tests pipeline logic (validator, store, dedup, recall)
+- **Adversarial**: returns garbage → tests defensive capabilities (validator rejection)
+
+**Report:** `reports/benchmark/latest.json` with environment metadata + baseline support
+
+---
+
+## 12. Testing
 
 ### Test Suite Overview
 
 ```
-139 tests | 18 files | 343 assertions | 0 failures | ~12s runtime
+258 tests | 34 files | 541 assertions | 1 failure (C1 SDK timeout) | ~17s runtime
 ```
 
 ### Test Files
