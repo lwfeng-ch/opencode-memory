@@ -34,6 +34,7 @@ import { captureSession } from "./capture.js"
 import type { CaptureContext } from "./capture.js"
 import { updateState, recordEvent } from "./state.js"
 import { initLogger, error as logError } from "./log.js"
+import { appendMessage } from "./message-cache.js"
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -293,11 +294,15 @@ export const MemoryPlugin: Plugin = async (input) => {
         sessionToolEvents.set(sid, [])
       }
 
+      // Cache message locally for extraction (decouples from SDK API)
+      const query = extractQueryFromMessage(output.message)
+      if (query) {
+        void appendMessage(memoryDir, sid, { role: "user", content: query }).catch(() => {})
+      }
+
       // Skip if recall is disabled
       if (!config.recall.enabled) return
 
-      // Extract user query from the message
-      const query = extractQueryFromMessage(output.message)
       if (!query || query.length < config.recall.minQueryLength) return
 
       // Fire recall — create RecallHandle (never await in background mode)
