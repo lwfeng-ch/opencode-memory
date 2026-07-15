@@ -26,6 +26,7 @@ import { info as logInfo, error as logError } from "./log.js"
 import { readCursor, writeCursor } from "./cursor.js"
 import { logEvent } from "./telemetry.js"
 import { scoreMemory } from "./recall.js"
+import { shouldMerge } from "./fingerprint.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -977,16 +978,8 @@ export async function extractSessionMemory(
 
     const provenance = buildProvenanceFrontmatter(sessionId, name, description)
     const semanticContent = provenance + responseBody
-    await store.write(semanticFile, semanticContent)
 
-    // ────────────────────────────────────────────────────────────────────
-    // Step 9: Record success — processing metadata + state.json
-    // ────────────────────────────────────────────────────────────────────
-    await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
-
-    // ────────────────────────────────────────────────────────────────────
-    // Step 10: Update extraction cursor
-    // ────────────────────────────────────────────────────────────────────
+    // Update extraction cursor (must happen regardless of write/dedup skip)
     const newOffset = (cursorOffset > messages.length ? 0 : cursorOffset) + messages.length
     await writeCursor(memoryDir, {
       sessionId,
@@ -994,6 +987,21 @@ export async function extractSessionMemory(
       lastProcessedAt: new Date().toISOString(),
       lastTouchedFiles: [semanticFile],
     })
+
+    // Check semantic fingerprint for dedup — skip write if > 80% similar to existing
+    const existing = await store.exists(semanticFile) ? await store.read(semanticFile) : ""
+    if (existing && shouldMerge(existing, semanticContent)) {
+      logInfo("memory:extraction", `session=${sessionId} skipped duplicate (fingerprint match)`)
+      await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
+      return { success: true }
+    }
+
+    await store.write(semanticFile, semanticContent)
+
+    // ────────────────────────────────────────────────────────────────────
+    // Step 9: Record success — processing metadata + state.json
+    // ────────────────────────────────────────────────────────────────────
+    await recordExtractionSuccess(memoryDir, sessionId, statePath, semanticFile)
 
     return { success: true }
   } catch (err: unknown) {
