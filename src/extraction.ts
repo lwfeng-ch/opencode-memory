@@ -27,6 +27,7 @@ import { readCursor, writeCursor } from "./cursor.js"
 import { logEvent } from "./telemetry.js"
 import { scoreMemory } from "./recall.js"
 import { shouldMerge } from "./fingerprint.js"
+import { readMessages } from "./message-cache.js"
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -825,19 +826,31 @@ export async function extractSessionMemory(
     // ────────────────────────────────────────────────────────────────────
     // Step 3: Read recent message snapshot (incremental — only new messages)
     //
-    // Uses the cursor offset to read only messages that haven't been
-    // processed yet. Falls back to fact record alone if adapter fails.
+    // Priority: local message cache (P1) → SDK API (fallback)
+    // The cursor offset ensures we only process new messages.
     // ────────────────────────────────────────────────────────────────────
     let messages: unknown[] = []
-    // SDK doesn't support offset-based pagination, so we fetch all messages
-    // and slice. The cursor ensures we only SEND new messages to the LLM.
-    // Limit to 500 to bound API payload size (cursor handles the rest).
+    const safeOffset = cursorOffset
+
+    // Try local cache first (decoupled from SDK API)
     try {
-      const allMessages = await adapter.session.messages(sessionId, 500)
-      const safeOffset = cursorOffset > allMessages.length ? 0 : cursorOffset
-      messages = allMessages.slice(safeOffset)
+      const cached = await readMessages(memoryDir, sessionId, safeOffset)
+      if (cached.length > 0) {
+        messages = cached.map((m) => ({ role: m.role, content: m.content }))
+      }
     } catch {
-      // Message snapshot is optional — fact record provides context
+      // Cache read failed — fall through to SDK
+    }
+
+    // Fallback: SDK API if cache was empty
+    if (messages.length === 0) {
+      try {
+        const allMessages = await adapter.session.messages(sessionId, 500)
+        const sdkOffset = cursorOffset > allMessages.length ? 0 : cursorOffset
+        messages = allMessages.slice(sdkOffset)
+      } catch {
+        // Message snapshot is optional — fact record provides context
+      }
     }
 
     // If no new messages since last cursor, skip extraction (just update timestamp)
