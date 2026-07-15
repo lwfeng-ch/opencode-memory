@@ -289,7 +289,77 @@ function ensureProvenance(content: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 — Orient
+// Phase 1+2 Combined — Prepare Dream Context
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the combined orient+gather response.
+ * Handles JSON wrapped in code fences or bare objects.
+ *
+ * Exported for unit testing.
+ */
+export function parsePrepareResponse(text: string): { orient: Record<string, unknown>; gather: Record<string, unknown> } {
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const jsonText = fenceMatch ? fenceMatch[1] : text
+  try {
+    const parsed = JSON.parse(jsonText)
+    return {
+      orient: parsed.orient ?? {},
+      gather: parsed.gather ?? {},
+    }
+  } catch {
+    return { orient: {}, gather: {} }
+  }
+}
+
+/**
+ * Phase 1+2 Combined — Prepare Dream Context.
+ *
+ * Replaces separate orientPhase + gatherPhase with a single LLM call.
+ * The 4-phase logical concept (orient → gather → consolidate → prune)
+ * is preserved — this function returns both results as separate fields.
+ */
+async function prepareDreamContext(
+  store: MemoryStore,
+  config: MemoryPluginConfig,
+  adapter: RuntimeAdapter,
+): Promise<{ orient: unknown; gather: unknown }> {
+  const memories = await scanMemoryFiles(store)
+  const manifest = formatManifest(memories)
+
+  const prompt = [
+    "You are preparing dream consolidation context. Do two things:",
+    "",
+    "1. ORIENT: Identify memories that may be outdated, duplicated, or need merging.",
+    "2. GATHER: For each candidate, describe the specific issue.",
+    "",
+    "## Current Memory Files",
+    manifest || "(none)",
+    "",
+    "## Output Format (JSON only)",
+    "```json",
+    "{",
+    '  "orient": {',
+    '    "drift_candidates": ["file1.md", "file2.md"]',
+    "  },",
+    '  "gather": {',
+    '    "facts": [',
+    '      {"filename": "file1.md", "issue": "outdated - references deleted function"}',
+    "    ]",
+    "  }",
+    "}",
+    "```",
+  ].join("\n")
+
+  const createOpts = resolveAgentConfig(config, "dream")
+  const session = await adapter.session.create(createOpts)
+  const response = await adapter.session.prompt(session.id, prompt)
+  const text = typeof response === "string" ? response : JSON.stringify(response)
+  return parsePrepareResponse(text)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 — Orient (kept for fallback, but prepareDreamContext is preferred)
 // ---------------------------------------------------------------------------
 
 /**
@@ -693,30 +763,20 @@ export async function runDreamConsolidation(
   })
 
   try {
-    // Phase 1 — Orient
+    // Phase 1+2 — Prepare (combined orient + gather, single LLM call)
     let orientResult: unknown = {}
-    try {
-      orientResult = await orientPhase(store, config, adapter)
-      phases.push("orient")
-    } catch (err) {
-      errors.push(`orient: ${err instanceof Error ? err.message : String(err)}`)
-    }
-
-    // Phase 2 — Gather (depends on orient to identify drift candidates)
     let gatherResult: unknown = {}
-    if (phases.includes("orient")) {
-      try {
-        gatherResult = await gatherPhase(store, config, adapter, orientResult)
-        phases.push("gather")
-      } catch (err) {
-        errors.push(`gather: ${err instanceof Error ? err.message : String(err)}`)
-      }
+    try {
+      const prepared = await prepareDreamContext(store, config, adapter)
+      orientResult = prepared.orient
+      gatherResult = prepared.gather
+      phases.push("orient", "gather")
+    } catch (err) {
+      errors.push(`prepare: ${err instanceof Error ? err.message : String(err)}`)
     }
 
-    // Phase 3 — Consolidate (depends on both orient and gather)
-    const canConsolidate =
-      phases.includes("orient") && phases.includes("gather")
-    if (canConsolidate) {
+    // Phase 3 — Consolidate (depends on prepare results)
+    if (phases.includes("orient")) {
       try {
         await consolidatePhase(store, config, adapter, orientResult, gatherResult)
         phases.push("consolidate")
