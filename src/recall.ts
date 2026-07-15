@@ -16,10 +16,12 @@ import type { MemoryHeader, MemoryPluginConfig, AgentSessionCreateOptions } from
 import { resolveAgentConfig } from "./config.js";
 import type { MemoryStore } from "./store.js";
 import { scanMemoryFiles, formatManifest } from "./scan.js";
-import { memoryAgeDays } from "./staleness.js";
 import { checkMemoryPressure } from "./health.js";
 import type { MemoryPressureReport } from "./health.js";
 import { logEvent } from "./telemetry.js";
+// Re-export scoreMemory from evaluation layer (extracted in v0.3.0)
+export { scoreMemory, scoreMemories } from "./evaluation/scoring.js"
+import { scoreMemory } from "./evaluation/scoring.js";
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -127,66 +129,9 @@ async function getCachedPressure(
 // ---------------------------------------------------------------------------
 // Stage 1 — Rule filter scoring
 // ---------------------------------------------------------------------------
+// scoreMemory and TYPE_KEYWORDS extracted to evaluation/scoring.ts in v0.3.0
+// recall.ts imports from evaluation layer; re-exports for backward compatibility
 
-/**
- * Type-keyword map for the type bonus in Stage 1 scoring.
- * Each entry maps a set of trigger words to a memory type.
- */
-const TYPE_KEYWORDS: Array<{ words: string[]; type: string }> = [
-  { words: ["user", "role"], type: "user" },
-  { words: ["feedback", "correct", "stop"], type: "feedback" },
-  { words: ["project", "deadline"], type: "project" },
-  { words: ["reference", "url", "link"], type: "reference" },
-];
-
-/**
- * Score a memory header against the query.
- *
- * Three additive components:
- *   1. Keyword overlap — count of query words (>2 chars) that appear in
- *      the header's description or filename (case-insensitive)
- *   2. Type bonus — +2 when query contains type-related trigger words
- *      matching the memory's type
- *   3. Recency bonus — max(0, 3 - floor(ageDays / 7)), decays over 3 weeks
- */
-export function scoreMemory(query: string, header: MemoryHeader): number {
-  const queryLower = query.toLowerCase();
-
-  // --- Keyword overlap ---
-  const queryWords = queryLower
-    .split(/\s+/)
-    .filter((w) => w.length > 2);
-  const descriptionLower = header.description?.toLowerCase() ?? "";
-  const filenameLower = header.filename.toLowerCase();
-
-  let keywordScore = 0;
-  for (const word of queryWords) {
-    if (descriptionLower.includes(word) || filenameLower.includes(word)) {
-      keywordScore++;
-    }
-  }
-
-  // --- Type bonus ---
-  let typeBonus = 0;
-  if (header.type !== undefined) {
-    for (const entry of TYPE_KEYWORDS) {
-      if (entry.type === header.type && entry.words.some((w) => queryLower.includes(w))) {
-        typeBonus += 2;
-      }
-    }
-  }
-
-  // --- Recency bonus — only applies when there's at least some keyword/type relevance ---
-  // Without this guard, fresh files score 3+ even with zero relevance, flooding recall
-  // with unrelated memories. Recency should amplify relevance, not create it.
-  let recencyBonus = 0;
-  if (keywordScore > 0 || typeBonus > 0) {
-    const ageDays = memoryAgeDays(header.mtimeMs);
-    recencyBonus = Math.max(0, 3 - Math.floor(ageDays / 7));
-  }
-
-  return keywordScore + typeBonus + recencyBonus;
-}
 
 // ---------------------------------------------------------------------------
 // Stage 2 — LLM rerank helpers

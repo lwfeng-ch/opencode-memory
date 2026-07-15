@@ -111,7 +111,7 @@ export class FileSystemStore implements MemoryStore {
           const stats = await stat(filePath)
           // Read only the first few KB for frontmatter (avoid reading entire large files)
           const fh = await open(filePath, "r")
-          let fm: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number }
+          let fm: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string }
           try {
             const buf = Buffer.alloc(4096)
             const { bytesRead } = await fh.read(buf, 0, 4096, 0)

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest"
-import { extractKeywords, jaccardSimilarity, computeFingerprint, shouldMerge } from "../src/fingerprint.js"
+import { extractKeywords, jaccardSimilarity, computeFingerprint, shouldMerge } from "../../src/evaluation/fingerprint.js"
 
 describe("extractKeywords", () => {
   test("extracts meaningful words > 3 chars", () => {
