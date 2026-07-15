@@ -43,6 +43,9 @@ export interface MemoryStore {
   /** Check if a file exists. */
   exists(filename: string): Promise<boolean>
 
+  /** Update recall tracking metadata for a memory file. */
+  touch(filename: string): Promise<void>
+
   /** Get the memory directory path. */
   getDir(): string
 }
@@ -53,19 +56,21 @@ export interface MemoryStore {
 
 export function parseFrontmatter(
   content: string,
-): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number } {
+): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
   const yaml = match[1]
-  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number } = {}
+  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string } = {}
   for (const line of yaml.split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/)
     if (!kv) continue
     const [, key, value] = kv
-    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence") {
-      result[key] = value.trim()
+    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence" || key === "last_recalled_at") {
+      (result as Record<string, unknown>)[key] = value.trim()
     } else if (key === "schema_version") {
       result.schema_version = parseInt(value.trim(), 10)
+    } else if (key === "recall_count") {
+      result.recall_count = parseInt(value.trim(), 10) || 0
     }
   }
   return result
@@ -124,6 +129,8 @@ export class FileSystemStore implements MemoryStore {
             scope: fm.scope as MemoryHeader["scope"],
             confidence: parseConfidence(fm.confidence),
             schemaVersion: fm.schema_version,
+            recallCount: fm.recall_count ?? 0,
+            lastRecalledAt: fm.last_recalled_at ?? null,
           }
         }),
       )
@@ -196,6 +203,33 @@ export class FileSystemStore implements MemoryStore {
       throw new Error(`Path traversal rejected: ${filename}`)
     }
     return join(this.dir, filename)
+  }
+
+  async touch(filename: string): Promise<void> {
+    const filePath = this.resolvePath(filename)
+    try {
+      const content = await readFile(filePath, { encoding: "utf-8" })
+      const fm = parseFrontmatter(content)
+      const currentCount = fm.recall_count ?? 0
+      const newCount = currentCount + 1
+      const now = new Date().toISOString()
+
+      // Rebuild: strip old frontmatter, prepend updated frontmatter
+      const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "")
+      const lines = ["---"]
+      if (fm.name) lines.push(`name: ${fm.name}`)
+      if (fm.description) lines.push(`description: ${fm.description}`)
+      if (fm.type) lines.push(`type: ${fm.type}`)
+      if (fm.scope) lines.push(`scope: ${fm.scope}`)
+      if (fm.confidence) lines.push(`confidence: ${fm.confidence}`)
+      if (fm.schema_version !== undefined) lines.push(`schema_version: ${fm.schema_version}`)
+      lines.push(`recall_count: ${newCount}`)
+      lines.push(`last_recalled_at: ${now}`)
+      lines.push("---", "")
+      await writeFile(filePath, lines.join("\n") + body, { encoding: "utf-8" })
+    } catch {
+      // File doesn't exist or can't be read — silent
+    }
   }
 }
 

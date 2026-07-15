@@ -556,6 +556,35 @@ async function prunePhase(
       !m.filename.startsWith("legacy/"),
   )
 
+  // Prune stale memories: not recalled in 180 days AND not explicit confidence
+  // Never delete explicit memories — user-stated facts are always preserved
+  const PRUNE_AFTER_DAYS = 180
+  const now = Date.now()
+  const staleMemories = externalMemories.filter((m) => {
+    if (m.confidence === "explicit") return false // never delete explicit
+    if (!m.lastRecalledAt) return false // never recalled = might be new, skip
+    const recalledTime = new Date(m.lastRecalledAt).getTime()
+    if (Number.isNaN(recalledTime)) return false
+    const daysSinceRecall = Math.floor((now - recalledTime) / 86_400_000)
+    return daysSinceRecall > PRUNE_AFTER_DAYS
+  })
+  for (const m of staleMemories) {
+    try {
+      await store.delete(m.filename)
+    } catch {
+      // skip deletion failures
+    }
+  }
+
+  // Re-scan after pruning to get the final set
+  const finalMemories = (await scanMemoryFiles(store)).filter(
+    (m) =>
+      !m.filename.startsWith("semantic/") &&
+      !m.filename.startsWith("processing/") &&
+      !m.filename.startsWith("fact/") &&
+      !m.filename.startsWith("legacy/"),
+  )
+
   // Sort by type (canonical order) then filename
   const typeOrder: Record<string, number> = {
     user: 0,
@@ -564,7 +593,7 @@ async function prunePhase(
     reference: 3,
   }
 
-  const sorted = [...externalMemories].sort((a, b) => {
+  const sorted = [...finalMemories].sort((a, b) => {
     const ta = a.type !== undefined ? (typeOrder[a.type] ?? 99) : 99
     const tb = b.type !== undefined ? (typeOrder[b.type] ?? 99) : 99
     if (ta !== tb) return ta - tb

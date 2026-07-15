@@ -150,6 +150,9 @@ export interface MemoryHeader {
   scope: MemoryScope | undefined
   confidence: ConfidenceLevel
   schemaVersion: number | undefined
+  /** Recall usage tracking (P1) */
+  recallCount: number
+  lastRecalledAt: string | null
 }
 
 // ---------------------------------------------------------------------------

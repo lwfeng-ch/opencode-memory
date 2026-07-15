@@ -308,12 +308,19 @@ async function buildResultFromHeaders(
     })),
   );
 
-  return results
+  const memories = results
     .filter(
       (r): r is PromiseFulfilledResult<RelevantMemory> =>
         r.status === "fulfilled",
     )
     .map((r) => r.value);
+
+  // Touch all recalled memories for usage tracking (non-blocking)
+  if (memories.length > 0) {
+    void Promise.allSettled(memories.map((m) => store.touch(m.filename)));
+  }
+
+  return memories;
 }
 
 // ---------------------------------------------------------------------------
