@@ -12,7 +12,7 @@
  * Called by quality-score.ts (DefaultMemoryQualityEvaluator).
  */
 
-import { shouldMerge } from "./fingerprint.js"
+import { computeFingerprint, jaccardSimilarity } from "./fingerprint.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -84,19 +84,77 @@ export function checkCompleteness(memories: QualityMemory[]): number {
 
 /**
  * Check for duplicate memories using semantic fingerprint.
- * Uses shouldMerge() (TF-IDF Jaccard > 0.8) to detect semantic duplicates.
+ * Uses computeFingerprint() + jaccardSimilarity() >= 0.8 to detect semantic duplicates.
+ *
+ * Optimization: pre-compute fingerprints once (avoid re-parsing on every comparison),
+ * then bucket by keyword count. Only memories in buckets where Jaccard >= 0.8 is
+ * mathematically possible are compared.
+ *
+ * For sets A (size s) and B (size s+k), Jaccard = |A∩B| / |A∪B|.
+ * Max Jaccard = s / (s+k) (when A ⊆ B). For this to be >= 0.8: k <= floor(s/4).
+ * So for bucket size s, we check buckets in range [s - floor(s/4), s + floor(s/4)].
+ * When s < 4, floor(s/4) = 0, so we check adjacent buckets too (k=1 still possible at s=4).
+ * To be safe, minimum range is ±1.
+ *
  * Returns 0-100 score (100 = no duplicates, lower = more duplicates).
  */
 export function checkConsistency(memories: QualityMemory[]): number {
   if (memories.length < 2) return 100
+
+  // Pre-compute fingerprints to avoid redundant parsing
+  const fingerprints = memories.map((m) => ({
+    fp: computeFingerprint(m.content),
+    size: 0,
+  }))
+  for (const f of fingerprints) f.size = f.fp.size
+
+  // Bucket by fingerprint size
+  const buckets = new Map<number, number[]>()
+  for (let i = 0; i < fingerprints.length; i++) {
+    const sz = fingerprints[i].size
+    if (!buckets.has(sz)) buckets.set(sz, [])
+    buckets.get(sz)!.push(i)
+  }
+
   let duplicatePairs = 0
-  for (let i = 0; i < memories.length; i++) {
-    for (let j = i + 1; j < memories.length; j++) {
-      if (shouldMerge(memories[i].content, memories[j].content)) {
-        duplicatePairs++
+  const compared = new Set<string>() // dedup pair counting
+
+  const sortedSizes = [...buckets.keys()].sort((a, b) => a - b)
+  for (let si = 0; si < sortedSizes.length; si++) {
+    const sz = sortedSizes[si]
+    const indices = buckets.get(sz)!
+
+    // Calculate max size difference where Jaccard >= 0.8 is possible
+    // k <= floor(s/4), but minimum range ±1 for small sets
+    const maxK = Math.max(1, Math.floor(sz / 4))
+
+    // Same bucket comparisons
+    for (let bi = 0; bi < indices.length; bi++) {
+      for (let bj = bi + 1; bj < indices.length; bj++) {
+        if (jaccardSimilarity(fingerprints[indices[bi]].fp, fingerprints[indices[bj]].fp) >= 0.8) {
+          duplicatePairs++
+        }
+      }
+    }
+
+    // Cross-bucket comparisons: check all buckets within [sz+1, sz+maxK]
+    for (let sj = si + 1; sj < sortedSizes.length; sj++) {
+      const nextSz = sortedSizes[sj]
+      if (nextSz > sz + maxK) break // no more possible buckets
+      const nextIndices = buckets.get(nextSz)!
+      for (const i of indices) {
+        for (const j of nextIndices) {
+          const pairKey = i < j ? `${i}-${j}` : `${j}-${i}`
+          if (compared.has(pairKey)) continue
+          compared.add(pairKey)
+          if (jaccardSimilarity(fingerprints[i].fp, fingerprints[j].fp) >= 0.8) {
+            duplicatePairs++
+          }
+        }
       }
     }
   }
+
   const maxPairs = (memories.length * (memories.length - 1)) / 2
   const penalty = maxPairs > 0 ? (duplicatePairs / maxPairs) * 100 : 0
   return Math.max(0, Math.round(100 - penalty))

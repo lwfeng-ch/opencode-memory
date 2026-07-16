@@ -21,15 +21,38 @@ const STOP_WORDS = new Set([
 ])
 
 /**
- * Extract meaningful keywords from text (lowercase, > 3 chars, not stop words).
+ * Extract meaningful keywords from text.
+ *
+ * Rules:
+ *   - Lowercase
+ *   - Preserve version-like patterns (e.g. "3.10", "v11", "YOLOv11") as single tokens
+ *     by replacing dots within version numbers with underscores before splitting
+ *   - Split on non-alphanumeric (keep letters, digits, spaces)
+ *   - Words > 3 chars, not stop words → keyword
+ *   - Version-like tokens (contains digit, > 2 chars) preserved as keywords
+ *     so "Python 3_10" ≠ "Python 3_11"
  */
 export function extractKeywords(text: string): string[] {
-  const words = text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 3 && !STOP_WORDS.has(w))
-  return [...new Set(words)]
+  const lower = text.toLowerCase()
+  // Preserve version-like patterns: "3.10" → "3_10", "v1.2.3" → "v1_2_3"
+  const versionPreserved = lower.replace(/(\d+)\.(\d+)/g, "$1_$2")
+  const cleaned = versionPreserved.replace(/[^a-z0-9_\s]/g, " ")
+  const words = cleaned.split(/\s+/).filter((w) => w.length > 0)
+  const keywords = new Set<string>()
+
+  for (const w of words) {
+    // Version-like token: contains a digit and is > 2 chars (e.g. "3_10", "v11", "yolov11")
+    const hasDigit = /\d/.test(w)
+    const isVersionLike = hasDigit && w.length > 2
+
+    if (isVersionLike) {
+      keywords.add(w)
+    } else if (w.length > 3 && !STOP_WORDS.has(w)) {
+      keywords.add(w)
+    }
+  }
+
+  return [...keywords]
 }
 
 /**

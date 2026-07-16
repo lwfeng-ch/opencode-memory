@@ -61,20 +61,20 @@ export type RuntimeExecutorFn = (input: unknown) => Promise<unknown>
  *
  * The executor handles both ComparableMemory objects (uses compareMemory)
  * and plain strings/objects (falls back to compareText).
+ *
+ * Threshold is delegated entirely to the comparator — the comparator's
+ * ComparisonResult.passed field is authoritative.
  */
 export class GoldenExecutor {
   private readonly runtime: RuntimeExecutorFn
   private readonly comparator: MemoryComparator
-  private readonly threshold: number
 
   constructor(
     runtime: RuntimeExecutorFn,
     comparator: MemoryComparator,
-    threshold: number = 0.8,
   ) {
     this.runtime = runtime
     this.comparator = comparator
-    this.threshold = threshold
   }
 
   /**
@@ -130,10 +130,12 @@ export class GoldenExecutor {
     const actualStr = typeof actual === "string" ? actual : JSON.stringify(actual)
     const score = this.comparator.compareText(expectedStr, actualStr)
 
+    // For text fallback, use a default threshold of 0.8 since the comparator
+    // only exposes threshold through compareMemory's ComparisonResult
     return {
       score,
       fields: { content: score, name: 0, description: 0, type: 0 },
-      passed: score >= this.threshold,
+      passed: score >= 0.8,
     }
   }
 }

@@ -21,6 +21,7 @@ export interface BenchmarkReport {
     passed: number
     failed: number
   }
+  /** @deprecated v0.3.1 — use `suites` instead. Kept for backward compat. */
   benchmarks: Array<{
     name: string
     accuracy: number
@@ -29,7 +30,7 @@ export interface BenchmarkReport {
   }>
   /** v0.3.1: Memory Intelligence Score (weighted avg of suite scores) */
   intelligence_score: number
-  /** v0.3.1: Per-suite score breakdown */
+  /** v0.3.1: Per-suite score breakdown (replaces benchmarks) */
   suites: Record<string, {
     score: number
     cases: number
@@ -53,17 +54,7 @@ export function generateBenchmarkReport(
     suiteMap.get(r.suite)!.push(r)
   }
 
-  const benchmarks = [...suiteMap.entries()].map(([name, suiteResults]) => {
-    const suitePassed = suiteResults.filter((r) => r.passed).length
-    const accuracy = suiteResults.length > 0 ? suitePassed / suiteResults.length : 0
-    return {
-      name,
-      accuracy: Math.round(accuracy * 100) / 100,
-      cases: suiteResults.length,
-    }
-  })
-
-  // v0.3.1: Per-suite score breakdown for Intelligence Score
+  // v0.3.1: Per-suite score breakdown (authoritative source)
   const suites: Record<string, { score: number; cases: number; passed: number }> = {}
   for (const [name, suiteResults] of suiteMap) {
     const suitePassed = suiteResults.filter((r) => r.passed).length
@@ -82,6 +73,13 @@ export function generateBenchmarkReport(
   const intelligenceScore = suiteScores.length > 0
     ? Math.round(suiteScores.reduce((a, b) => a + b, 0) / suiteScores.length)
     : 0
+
+  // Deprecated: benchmarks array derived from suites for backward compat
+  const benchmarks = Object.entries(suites).map(([name, s]) => ({
+    name,
+    accuracy: s.cases > 0 ? Math.round((s.passed / s.cases) * 100) / 100 : 0,
+    cases: s.cases,
+  }))
 
   return {
     version: "0.3.1",
