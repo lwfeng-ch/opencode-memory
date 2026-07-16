@@ -9,10 +9,12 @@
  */
 
 import { DefaultBenchmarkRunner } from "../benchmark/runner.js"
-import type { BenchmarkCase, BenchmarkExecutor } from "../benchmark/runner.js"
+import type { BenchmarkCase, BenchmarkExecutor, BenchmarkResult } from "../benchmark/runner.js"
 import { loadDataset, filterBySuite } from "../benchmark/dataset.js"
 import { generateBenchmarkReport, formatBenchmarkJSON, formatBenchmarkConsole, formatBenchmarkMarkdown } from "../benchmark/reporter.js"
 import { createMockExecutor, type MockMode } from "../benchmark/executor/mock.js"
+import { GoldenExecutor, type GoldenCase } from "../benchmark/executor/golden.js"
+import { DefaultMemoryComparator } from "../src/evaluation/comparison.js"
 import { writeFile, mkdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
@@ -21,6 +23,7 @@ interface BenchmarkArgs {
   suite?: string
   format: "console" | "json" | "markdown"
   mode: MockMode
+  benchmarkMode: "mock" | "golden"
 }
 
 function parseArgs(argv: string[]): BenchmarkArgs {
@@ -28,6 +31,7 @@ function parseArgs(argv: string[]): BenchmarkArgs {
     json: false,
     format: "console",
     mode: "strict",
+    benchmarkMode: "mock",
   }
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i]
@@ -42,6 +46,12 @@ function parseArgs(argv: string[]): BenchmarkArgs {
       result.format = arg.split("=")[1] as "console" | "json" | "markdown"
     } else if (arg === "--adversarial") {
       result.mode = "adversarial"
+    } else if (arg === "--mode" && i + 1 < argv.length) {
+      const modeVal = argv[++i]
+      if (modeVal === "golden") result.benchmarkMode = "golden"
+    } else if (arg.startsWith("--mode=")) {
+      const modeVal = arg.split("=")[1]
+      if (modeVal === "golden") result.benchmarkMode = "golden"
     }
   }
 
@@ -58,24 +68,50 @@ async function main() {
   // Load dataset
   const dataDir = join(process.cwd(), "benchmark", "data")
   const allCases = await loadDataset(dataDir)
-  const cases: BenchmarkCase[] = args.suite
-    ? filterBySuite(allCases, args.suite as BenchmarkCase["suite"])
-    : allCases
 
-  if (cases.length === 0) {
-    console.log("No benchmark cases found.")
-    process.exit(0)
+  let results: BenchmarkResult[]
+
+  if (args.benchmarkMode === "golden") {
+    // Golden mode: use GoldenExecutor with mock runtime (returns expected as actual)
+    const goldenCases = (args.suite
+      ? filterBySuite(allCases, args.suite as BenchmarkCase["suite"])
+      : allCases
+    ).filter((c) => c.id.startsWith("golden-")) as GoldenCase[]
+
+    if (goldenCases.length === 0) {
+      console.log("No golden benchmark cases found.")
+      process.exit(0)
+    }
+
+    // Mock runtime: returns expected output (baseline score = 100)
+    // v0.3.2 will replace with real LLM runtime
+    const expectedLookup = new Map<string, unknown>()
+    for (const c of goldenCases) {
+      expectedLookup.set(JSON.stringify(c.input), c.expected)
+    }
+    const runtime = async (input: unknown) => {
+      return expectedLookup.get(JSON.stringify(input)) ?? input
+    }
+    const executor = new GoldenExecutor(runtime, new DefaultMemoryComparator(0.8))
+    results = await executor.execute(goldenCases)
+  } else {
+    // Mock mode: existing behavior
+    const cases: BenchmarkCase[] = args.suite
+      ? filterBySuite(allCases, args.suite as BenchmarkCase["suite"])
+      : allCases
+
+    if (cases.length === 0) {
+      console.log("No benchmark cases found.")
+      process.exit(0)
+    }
+
+    const executor: BenchmarkExecutor = createMockExecutor(args.mode)
+    const runner = new DefaultBenchmarkRunner()
+    results = await runner.run(cases, executor)
   }
 
-  // Create executor
-  const executor: BenchmarkExecutor = createMockExecutor(args.mode)
-
-  // Run
-  const runner = new DefaultBenchmarkRunner()
-  const results = await runner.run(cases, executor)
-
-  // Generate report — map MockMode to BenchmarkMode for reporting
-  const reportMode = args.mode === "adversarial" ? "mock" : "mock"
+  // Generate report
+  const reportMode = args.benchmarkMode === "golden" ? "golden" : "mock"
   const report = generateBenchmarkReport(results, reportMode)
 
   // Output

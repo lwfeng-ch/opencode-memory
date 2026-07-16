@@ -38,8 +38,11 @@
 ### 可观测性与评估 (v0.3+)
 - **记忆审计** — `bun run audit` 扫描记忆目录，检测质量问题（截断描述、缺失字段、空内容）、重复（TF-IDF Jaccard）、冲突（版本号/技术切换检测）、过期（180 天未召回）。只读——永不修改文件
 - **基准测试框架** — `bun run benchmark` 运行 5 个测试套件（Dedup、Recall、Conflict、ExtractionPipeline、Forgetting），Mock 模式含 strict + adversarial 双模式执行器。输出 JSON/Markdown/Console
-- **评估层** — 独立评价原语（fingerprint、scoring、comparison、metrics、types），Audit 和 Benchmark 共享，无循环依赖
-- **CLI 工具** — `scripts/audit-cli.ts` 和 `scripts/benchmark-cli.ts`，支持 `--json`、`--scope`、`--suite`、`--format` 参数
+- **Golden 基准测试** (v0.3.1) — `bun run benchmark --mode golden` 运行 50 条 golden 数据集案例，使用语义比较评分。输出 Memory Intelligence Score
+- **记忆质量评分** (v0.3.1) — `bun run quality` 评估 5 个维度（完整性、一致性、新鲜度、噪声、可检索性），输出总体质量分 0-100
+- **语义比较器** (v0.3.1) — 三层文本比较（Token Jaccard 20% + TF-IDF 50% + Bigram 30%），支持中文 CJK + 字段权重记忆比较（content 50%, description 20%, type 20%, name 10%）
+- **评估层** — 独立评价原语（fingerprint、scoring、comparison、metrics、types），Audit、Benchmark、Quality 共享，无循环依赖
+- **CLI 工具** — `scripts/audit-cli.ts`、`scripts/benchmark-cli.ts`、`scripts/quality-cli.ts`，支持 `--json`、`--scope`、`--suite`、`--mode`、`--format` 参数
 
 ## 架构
 
@@ -54,11 +57,13 @@ src/
 ├── extraction.ts         KAIROS 提取：验证器 + 指纹 + 语义描述 + 显式反馈 + 候选检测
 ├── extraction-validator.ts  4 层质量门（schema/section/placeholder/length）— 纯函数
 ├── evaluation/           共享评价原语 (v0.3+)
-│   ├── types.ts          EvaluationResult, EvaluationContext — audit/benchmark 统一类型
+│   ├── types.ts          EvaluationResult, EvaluationContext
 │   ├── metrics.ts        纯数学函数：precision, recallAtK, f1, reductionRate
-│   ├── fingerprint.ts    TF-IDF + Jaccard 相似度（从 src/ 迁移）
-│   ├── scoring.ts        scoreMemory 从 recall.ts 提取 — 关键词匹配 + 类型加分 + 新鲜度
-│   └── comparison.ts     SemanticComparator<T> + TokenJaccardComparator + ArrayOverlapComparator
+│   ├── fingerprint.ts    TF-IDF + Jaccard 相似度
+│   ├── scoring.ts        scoreMemory 从 recall.ts 提取
+│   ├── comparison.ts     SemanticComparator + DefaultMemoryComparator（三层算法 + 字段权重, v0.3.1）
+│   ├── quality.ts        5 维度检查函数 (v0.3.1)
+│   └── quality-score.ts  MemoryQualityEvaluator + QualityReport (v0.3.1)
 ├── audit/                只读记忆健康扫描 (v0.3+)
 │   ├── index.ts          MemoryAuditService — 插件模式分析器编排
 │   ├── report.ts         AuditReport 生成 + JSON/Markdown/Console 格式化
@@ -93,12 +98,14 @@ benchmark/                项目根目录测试框架（不在 src/ 中，不打
 ├── metrics.ts            Metric<T> 实现（Dedup, Recall@K, Conflict, F1, Obsolete）
 ├── reporter.ts           BenchmarkReport 生成 → reports/benchmark/latest.json
 ├── executor/mock.ts      Mock 执行器：strict（返回期望值）+ adversarial（返回垃圾）
+├── executor/golden.ts    Golden 执行器：runtime + comparator (v0.3.1)
 ├── suites/               5 个套件实现（dedup, recall, conflict, extraction_pipeline, forgetting）
-└── data/                 11 个基准测试用例（真实会话风格数据）
+└── data/                 11 个 mock + 50 个 golden 基准测试用例 (v0.3.1)
 
 scripts/                  CLI 入口 (v0.3+)
 ├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
-└── benchmark-cli.ts      bun run benchmark [--suite X] [--json] [--adversarial]
+├── benchmark-cli.ts      bun run benchmark [--suite X] [--mode golden] [--json] [--adversarial]
+└── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
 ```
 
 ### 记忆流水线
@@ -300,9 +307,15 @@ bun run audit --scope user                   # 仅扫描用户 scope
 bun run benchmark                            # 全部套件，mock 模式
 bun run benchmark --suite dedup              # 仅指定套件
 bun run benchmark --adversarial              # 对抗模式 mock（测试防御能力）
+bun run benchmark --mode golden              # golden 模式语义比较 (v0.3.1)
+
+# Quality CLI — 记忆质量评分 (v0.3.1)
+bun run quality                              # 扫描项目记忆，控制台输出
+bun run quality --json                        # JSON 输出
+bun run quality --scope all                   # 扫描用户 + 项目两个 scope
 ```
 
-共 258 项测试，覆盖 34 个文件，257 项通过（1 个 C1 超时需活跃 OpenCode 实例）。
+共 350 项测试，覆盖 43 个文件，349 项通过（1 个 C1 超时需活跃 OpenCode 实例）。
 
 ## 设计原则
 
@@ -388,6 +401,32 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact Layer 架构、recall-selection 概念、symlink 保护
 
 ## 更新日志
+
+### v0.3.1 — 记忆质量回归与智能基准测试 (2026-07-15)
+
+**语义比较器**
+- `DefaultMemoryComparator` 三层文本比较：Token Jaccard（20%）+ TF-IDF 关键词（50%）+ 字符 Bigram（30%）
+- CJK 中文感知分词（2 字 bigram token）
+- `compareMemory` 字段权重比较：content（50%）、description（20%）、type（20%）、name（10%）
+- `ComparisonResult` 含逐字段评分和通过阈值
+
+**Golden 基准测试框架**
+- `GoldenExecutor` 包装 runtime 执行器 + 语义比较器
+- `GoldenCase` 接口扩展 `BenchmarkCase`，增加 model/reviewer/createdAt 元数据
+- 50 条 golden 数据集案例：Extraction（15）、Recall（15）、Dedup（8）、Conflict（7）、Forgetting（5）
+- `BenchmarkReport` 升级：`intelligence_score` + 逐套件评分 + v0.3.1 版本号
+
+**记忆质量评分**
+- `MemoryQualityEvaluator` 5 维度：完整性（20%）、一致性（25%）、新鲜度（15%）、噪声（20%）、可检索性（20%）
+- `QualityReport` 含总体评分和逐维度明细
+- 纯函数维度检查（无 I/O，无副作用）
+
+**CLI 工具**
+- `bun run quality` — 扫描记忆，输出 5 维度质量报告
+- `bun run benchmark --mode golden` — 运行 golden 基准测试，语义比较评分
+- 参数：`--json`、`--scope`、`--mode golden`
+
+**测试增长：** 258 → 350 项（+92），43 个文件，0 回归
 
 ### v0.3.0 — 记忆可观测性与评估基础 (2026-07-15)
 

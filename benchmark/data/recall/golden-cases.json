@@ -1,0 +1,122 @@
+[
+  {
+    "id": "golden-recall-001",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What programming language do I prefer?" },
+    "expected": ["language_preference.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Language preference recall" }
+  },
+  {
+    "id": "golden-recall-002",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What's my role?" },
+    "expected": ["user_role.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "User role recall" }
+  },
+  {
+    "id": "golden-recall-003",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What testing framework do I use?" },
+    "expected": ["testing_preference.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Testing framework recall" }
+  },
+  {
+    "id": "golden-recall-004",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What database are we using?" },
+    "expected": ["database_choice.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Database recall" }
+  },
+  {
+    "id": "golden-recall-005",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What's my deployment strategy?" },
+    "expected": ["deployment_memory.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Deployment recall" }
+  },
+  {
+    "id": "golden-recall-006",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "Who is on my team?" },
+    "expected": ["team_members.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Team recall" }
+  },
+  {
+    "id": "golden-recall-007",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What CI/CD pipeline do we use?" },
+    "expected": ["cicd_setup.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "CI/CD recall" }
+  },
+  {
+    "id": "golden-recall-008",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What's my code style preference?" },
+    "expected": ["code_style.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Code style recall" }
+  },
+  {
+    "id": "golden-recall-009",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What framework am I using?" },
+    "expected": ["framework_choice.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Framework recall" }
+  },
+  {
+    "id": "golden-recall-010",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "How do I handle errors?" },
+    "expected": ["error_handling.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Error handling recall" }
+  },
+  {
+    "id": "golden-recall-011",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What authentication method do we use?" },
+    "expected": ["auth_method.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Auth recall" }
+  },
+  {
+    "id": "golden-recall-012",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What API design pattern do I follow?" },
+    "expected": ["api_design.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "API design recall" }
+  },
+  {
+    "id": "golden-recall-013",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What architecture did we decide on?" },
+    "expected": ["architecture_decision.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Architecture recall" }
+  },
+  {
+    "id": "golden-recall-014",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What monitoring tools do we have?" },
+    "expected": ["monitoring_reference.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Monitoring recall" }
+  },
+  {
+    "id": "golden-recall-015",
+    "version": "0.3.1",
+    "suite": "recall",
+    "input": { "query": "What's my debugging approach?" },
+    "expected": ["debugging_preference.md"],
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Debugging recall" }
+  }
+]

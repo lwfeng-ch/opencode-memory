@@ -27,6 +27,14 @@ export interface BenchmarkReport {
     cases: number
     metrics?: Record<string, number>
   }>
+  /** v0.3.1: Memory Intelligence Score (weighted avg of suite scores) */
+  intelligence_score: number
+  /** v0.3.1: Per-suite score breakdown */
+  suites: Record<string, {
+    score: number
+    cases: number
+    passed: number
+  }>
 }
 
 export function generateBenchmarkReport(
@@ -55,8 +63,28 @@ export function generateBenchmarkReport(
     }
   })
 
+  // v0.3.1: Per-suite score breakdown for Intelligence Score
+  const suites: Record<string, { score: number; cases: number; passed: number }> = {}
+  for (const [name, suiteResults] of suiteMap) {
+    const suitePassed = suiteResults.filter((r) => r.passed).length
+    const suiteAvg = suiteResults.length > 0
+      ? suiteResults.reduce((sum, r) => sum + r.score, 0) / suiteResults.length
+      : 0
+    suites[name] = {
+      score: Math.round(suiteAvg * 100),
+      cases: suiteResults.length,
+      passed: suitePassed,
+    }
+  }
+
+  // v0.3.1: Intelligence Score = average of suite scores
+  const suiteScores = Object.values(suites).map((s) => s.score)
+  const intelligenceScore = suiteScores.length > 0
+    ? Math.round(suiteScores.reduce((a, b) => a + b, 0) / suiteScores.length)
+    : 0
+
   return {
-    version: "0.3.0",
+    version: "0.3.1",
     timestamp: new Date().toISOString(),
     mode,
     environment: {
@@ -71,6 +99,8 @@ export function generateBenchmarkReport(
       failed,
     },
     benchmarks,
+    intelligence_score: intelligenceScore,
+    suites,
   }
 }
 
@@ -81,11 +111,11 @@ export function formatBenchmarkJSON(report: BenchmarkReport): string {
 export function formatBenchmarkConsole(report: BenchmarkReport): string {
   const lines: string[] = []
   lines.push("=== Benchmark Report ===")
-  lines.push(`Mode: ${report.mode}  |  Score: ${report.summary.score}/100  |  Cases: ${report.summary.total_cases} (${report.summary.passed} pass, ${report.summary.failed} fail)`)
+  lines.push(`Mode: ${report.mode}  |  Intelligence Score: ${report.intelligence_score}/100  |  Cases: ${report.summary.total_cases} (${report.summary.passed} pass, ${report.summary.failed} fail)`)
   lines.push("")
 
-  for (const b of report.benchmarks) {
-    lines.push(`  ${b.name}: accuracy=${b.accuracy} cases=${b.cases}`)
+  for (const [name, suite] of Object.entries(report.suites)) {
+    lines.push(`  ${name}: score=${suite.score} cases=${suite.cases} (${suite.passed} pass)`)
   }
 
   return lines.join("\n")
@@ -104,16 +134,17 @@ export function formatBenchmarkMarkdown(report: BenchmarkReport): string {
   lines.push(`| Metric | Value |`)
   lines.push(`|--------|-------|`)
   lines.push(`| Score | ${report.summary.score}/100 |`)
+  lines.push(`| Intelligence Score | ${report.intelligence_score}/100 |`)
   lines.push(`| Total cases | ${report.summary.total_cases} |`)
   lines.push(`| Passed | ${report.summary.passed} |`)
   lines.push(`| Failed | ${report.summary.failed} |`)
   lines.push("")
-  lines.push("## Benchmarks")
+  lines.push("## Suite Scores")
   lines.push("")
-  lines.push(`| Suite | Accuracy | Cases |`)
-  lines.push(`|-------|----------|-------|`)
-  for (const b of report.benchmarks) {
-    lines.push(`| ${b.name} | ${b.accuracy} | ${b.cases} |`)
+  lines.push(`| Suite | Score | Cases | Passed |`)
+  lines.push(`|-------|-------|-------|--------|`)
+  for (const [name, suite] of Object.entries(report.suites)) {
+    lines.push(`| ${name} | ${suite.score} | ${suite.cases} | ${suite.passed} |`)
   }
 
   return lines.join("\n")

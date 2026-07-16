@@ -1,0 +1,67 @@
+[
+  {
+    "id": "golden-forget-001",
+    "version": "0.3.1",
+    "suite": "forgetting",
+    "input": {
+      "memories": [
+        { "content": "Project uses Python 3.8 runtime.", "recallCount": 0, "mtimeMs": 1704067200000, "confidence": "inferred" },
+        { "content": "Project has upgraded to Python 3.12 runtime.", "recallCount": 5, "mtimeMs": 1751328000000, "confidence": "explicit" }
+      ]
+    },
+    "expected": { "deprecated": 1, "should_deprecate": 1 },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Old Python version superseded" }
+  },
+  {
+    "id": "golden-forget-002",
+    "version": "0.3.1",
+    "suite": "forgetting",
+    "input": {
+      "memories": [
+        { "content": "We use jQuery for DOM manipulation.", "recallCount": 0, "mtimeMs": 1717200000000, "confidence": "inferred" },
+        { "content": "The frontend uses React for UI rendering.", "recallCount": 10, "mtimeMs": 1748736000000, "confidence": "explicit" }
+      ]
+    },
+    "expected": { "deprecated": 1, "should_deprecate": 1 },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Obsolete technology (jQuery)" }
+  },
+  {
+    "id": "golden-forget-003",
+    "version": "0.3.1",
+    "suite": "forgetting",
+    "input": {
+      "memories": [
+        { "content": "Sprint deadline is March 15th for feature X.", "recallCount": 0, "mtimeMs": 1735689600000, "confidence": "inferred" },
+        { "content": "Sprint deadline is July 30th for feature Y.", "recallCount": 3, "mtimeMs": 1753891200000, "confidence": "inferred" }
+      ]
+    },
+    "expected": { "deprecated": 1, "should_deprecate": 1 },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Expired deadline" }
+  },
+  {
+    "id": "golden-forget-004",
+    "version": "0.3.1",
+    "suite": "forgetting",
+    "input": {
+      "memories": [
+        { "content": "Alice is the team lead for the backend service.", "recallCount": 0, "mtimeMs": 1735689600000, "confidence": "inferred" },
+        { "content": "Bob is the new team lead for the backend service.", "recallCount": 8, "mtimeMs": 1750032000000, "confidence": "explicit" }
+      ]
+    },
+    "expected": { "deprecated": 1, "should_deprecate": 1 },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Old team member (left)" }
+  },
+  {
+    "id": "golden-forget-005",
+    "version": "0.3.1",
+    "suite": "forgetting",
+    "input": {
+      "memories": [
+        { "content": "API uses v2 endpoint at https://api.example.com/v2/users", "recallCount": 0, "mtimeMs": 1748736000000, "confidence": "inferred" },
+        { "content": "API has been upgraded to v3 at https://api.example.com/v3/users", "recallCount": 15, "mtimeMs": 1751328000000, "confidence": "explicit" }
+      ]
+    },
+    "expected": { "deprecated": 1, "should_deprecate": 1 },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Deprecated API version" }
+  }
+]

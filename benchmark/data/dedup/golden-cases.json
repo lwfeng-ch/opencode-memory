@@ -1,0 +1,114 @@
+[
+  {
+    "id": "golden-dedup-001",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User prefers Python for AI development and machine learning projects.",
+        "User prefers Python for machine learning and AI development projects.",
+        "User has a GTX1650 GPU for rendering."
+      ]
+    },
+    "expected": {
+      "merged_count": 1,
+      "remaining": ["User prefers Python for AI development and machine learning projects.", "User has a GTX1650 GPU for rendering."]
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Near-identical pair (word order swap)" }
+  },
+  {
+    "id": "golden-dedup-002",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "The user is a senior Go engineer who prefers backend development.",
+        "The weather today is sunny with a high of 25 degrees.",
+        "The project uses React and TypeScript for the frontend."
+      ]
+    },
+    "expected": { "merged_count": 0, "remaining": ["The user is a senior Go engineer who prefers backend development.", "The weather today is sunny with a high of 25 degrees.", "The project uses React and TypeScript for the frontend."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Three unrelated memories" }
+  },
+  {
+    "id": "golden-dedup-003",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User uses Python 3.10 for development purposes.",
+        "User uses Python 3.10 for development purposes.",
+        "User has a GTX1650 graphics card."
+      ]
+    },
+    "expected": { "merged_count": 1, "remaining": ["User uses Python 3.10 for development purposes.", "User has a GTX1650 graphics card."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Exact duplicate pair" }
+  },
+  {
+    "id": "golden-dedup-004",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "Project uses PostgreSQL for the main database.",
+        "The main database for this project is PostgreSQL.",
+        "PostgreSQL is used as the primary database for this project."
+      ]
+    },
+    "expected": { "merged_count": 2, "remaining": ["Project uses PostgreSQL for the main database."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Triple semantic duplicate" }
+  },
+  {
+    "id": "golden-dedup-005",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User prefers Python for data analysis and visualization tasks.",
+        "User prefers Go for high-performance backend services."
+      ]
+    },
+    "expected": { "merged_count": 0, "remaining": ["User prefers Python for data analysis and visualization tasks.", "User prefers Go for high-performance backend services."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Shared keywords, different meaning" }
+  },
+  {
+    "id": "golden-dedup-006",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "The API uses REST architecture with JSON payloads.",
+        "The API uses REST architecture with JSON payloads and OAuth2 authentication."
+      ]
+    },
+    "expected": { "merged_count": 0, "remaining": ["The API uses REST architecture with JSON payloads.", "The API uses REST architecture with JSON payloads and OAuth2 authentication."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Near-duplicate with extra info — no merge expected" }
+  },
+  {
+    "id": "golden-dedup-007",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "用户使用Python进行机器学习开发",
+        "用户使用Python进行机器学习开发",
+        "用户使用Go进行后端开发"
+      ]
+    },
+    "expected": { "merged_count": 1, "remaining": ["用户使用Python进行机器学习开发", "用户使用Go进行后端开发"] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Chinese exact duplicate" }
+  },
+  {
+    "id": "golden-dedup-008",
+    "version": "0.3.1",
+    "suite": "dedup",
+    "input": {
+      "memories": [
+        "User prefers TypeScript with React for frontend development.",
+        "User prefers TypeScript with React for frontend development and uses Tailwind CSS."
+      ]
+    },
+    "expected": { "merged_count": 0, "remaining": ["User prefers TypeScript with React for frontend development.", "User prefers TypeScript with React for frontend development and uses Tailwind CSS."] },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Mixed language near-duplicate with addition" }
+  }
+]

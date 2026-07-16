@@ -249,7 +249,9 @@ evaluation/ (shared primitives — v0.3+)
   ├── metrics.ts        precision, recallAtK, f1, reductionRate (pure math)
   ├── fingerprint.ts    TF-IDF + Jaccard (migrated from src/)
   ├── scoring.ts        scoreMemory (extracted from recall.ts)
-  └── comparison.ts      SemanticComparator<T> + TokenJaccardComparator
+  ├── comparison.ts      SemanticComparator + DefaultMemoryComparator (3-layer + field-weighted, v0.3.1)
+  ├── quality.ts        5 dimension check functions (v0.3.1)
+  └── quality-score.ts  MemoryQualityEvaluator + QualityReport (v0.3.1)
 
 audit/ (read-only health scanner — v0.3+)
   ├── index.ts          MemoryAuditService + 4 analyzer registration
@@ -264,12 +266,14 @@ benchmark/ (test harness — v0.3+, project root)
   ├── runner.ts         → metrics.ts (getMetricForSuite)
   ├── dataset.ts        loads JSON cases from data/
   ├── executor/mock.ts  strict + adversarial dual mode
+  ├── executor/golden.ts  runtime + comparator (v0.3.1)
   ├── suites/           5 suite implementations
-  └── reporter.ts       BenchmarkReport generation
+  └── reporter.ts       BenchmarkReport generation (intelligence_score + suites, v0.3.1)
 
 scripts/ (CLI — v0.3+)
   ├── audit-cli.ts      → audit/index.ts (createDefaultAuditService)
-  └── benchmark-cli.ts  → benchmark/runner.ts + dataset.ts + executor/mock.ts
+  ├── benchmark-cli.ts  → benchmark/runner.ts + dataset.ts + executor/mock.ts + executor/golden.ts
+  └── quality-cli.ts   → evaluation/quality-score.ts (v0.3.1)
 ```
 
 ---
@@ -681,7 +685,7 @@ type TelemetryEventType =
 
 ---
 
-## 11. Audit & Benchmark (v0.3+)
+## 11. Audit, Benchmark & Quality (v0.3+)
 
 ### Memory Audit
 
@@ -702,19 +706,47 @@ type TelemetryEventType =
 
 `bun run benchmark` runs 5 test suites in Mock mode (no LLM calls):
 
-| Suite | Metric | Tests |
-|-------|--------|-------|
-| Dedup | ReductionRate | 3 cases |
-| Recall | Recall@K | 3 cases |
-| Conflict | ConflictResolutionRate | 2 cases |
-| ExtractionPipeline | ExtractionF1 | 2 cases |
-| Forgetting | ObsoleteRate | 1 case |
+| Suite | Metric | Mock Cases | Golden Cases |
+|-------|--------|------------|--------------|
+| Dedup | ReductionRate | 3 | 8 |
+| Recall | Recall@K | 3 | 15 |
+| Conflict | ConflictResolutionRate | 2 | 7 |
+| ExtractionPipeline | ExtractionF1 | 2 | 15 |
+| Forgetting | ObsoleteRate | 1 | 5 |
 
 **Mock Executor dual mode:**
 - **Strict**: returns expected → tests pipeline logic (validator, store, dedup, recall)
 - **Adversarial**: returns garbage → tests defensive capabilities (validator rejection)
 
-**Report:** `reports/benchmark/latest.json` with environment metadata + baseline support
+**Golden Executor (v0.3.1):**
+- Wraps a `RuntimeExecutorFn` + `MemoryComparator`
+- Runs golden cases through runtime, compares actual vs expected using semantic comparison
+- v0.3.1 uses mock runtime (returns expected) → baseline score = 100
+- v0.3.2 will replace with real LLM runtime
+
+**Report:** `reports/benchmark/latest.json` with `intelligence_score`, per-suite scores, and environment metadata
+
+### Memory Quality Score (v0.3.1)
+
+`bun run quality` evaluates 5 quality dimensions:
+
+| Dimension | Weight | Checks |
+|-----------|--------|--------|
+| Completeness | 20% | name, description, type, scope, confidence present |
+| Consistency | 25% | Duplicate detection via shouldMerge (TF-IDF Jaccard >0.8) |
+| Freshness | 15% | Age < 180 days + recallCount > 0 (explicit = never stale) |
+| Noise | 20% | Placeholder content, generic names, empty/short bodies |
+| Retrievability | 20% | recallCount > 0 distribution |
+
+**Semantic Comparator (v0.3.1):**
+
+3-layer text comparison algorithm:
+- Layer 1 (20%): Token Jaccard — word-level set overlap (CJK 2-char bigram tokens)
+- Layer 2 (50%): TF-IDF keyword Jaccard — weighted keyword set overlap
+- Layer 3 (30%): Character bigram Jaccard — fine-grained substring overlap
+
+Field-weighted memory comparison:
+- content (50%), description (20%), type (20%), name (10%)
 
 ---
 
@@ -723,7 +755,7 @@ type TelemetryEventType =
 ### Test Suite Overview
 
 ```
-258 tests | 34 files | 541 assertions | 1 failure (C1 SDK timeout) | ~17s runtime
+350 tests | 43 files | 765 assertions | 1 failure (C1 SDK timeout) | ~11s runtime
 ```
 
 ### Test Files
@@ -753,16 +785,15 @@ type TelemetryEventType =
 
 ```bash
 # All tests
-bun test test/chain.test.ts test/config-pressure.test.ts test/cursor.test.ts \
-     test/entry-delete.test.ts test/health-pressure.test.ts test/integration.test.ts \
-     test/lock-recall.test.ts test/lock.test.ts test/paths.test.ts test/prompt.test.ts \
-     test/resolve-agent.test.ts test/scan.test.ts test/state-pressure.test.ts \
-     test/staleness.test.ts test/telemetry.test.ts test/tools.test.ts \
-     test/transient-filter.test.ts test/round10-integration.test.ts
+bun test test/
 
 # Individual suites
 bun test test/integration.test.ts          # 12 tests — Dream + Extraction + Plugin
 bun test test/round10-integration.test.ts  # 14 tests — Cursor + Pressure + RecallHandle
+bun test test/evaluation/comparison.test.ts # 25 tests — Semantic Comparator (v0.3.1)
+bun test test/evaluation/quality-score.test.ts # 15 tests — Quality Score (v0.3.1)
+bun test test/benchmark/golden.test.ts     # 10 tests — Golden Executor (v0.3.1)
+bun test test/integration-v031.test.ts     # 7 tests — v0.3.1 Integration
 ```
 
 ---

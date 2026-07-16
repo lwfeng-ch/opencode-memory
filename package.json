@@ -16,7 +16,9 @@
     "audit": "bun run scripts/audit-cli.ts",
     "benchmark": "bun run scripts/benchmark-cli.ts",
     "benchmark:mock": "bun run scripts/benchmark-cli.ts",
-    "benchmark:adversarial": "BENCHMARK_MODE=adversarial bun run scripts/benchmark-cli.ts"
+    "benchmark:adversarial": "BENCHMARK_MODE=adversarial bun run scripts/benchmark-cli.ts",
+    "benchmark:golden": "bun run scripts/benchmark-cli.ts --mode golden",
+    "quality": "bun run scripts/quality-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

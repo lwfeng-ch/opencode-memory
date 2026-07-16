@@ -38,8 +38,11 @@ Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architectur
 ### Observability & Evaluation (v0.3+)
 - **Memory Audit** — `bun run audit` scans memory directory for quality issues (truncated descriptions, missing fields, empty bodies), duplicates (TF-IDF Jaccard), conflicts (version/technology-switch detection), and staleness (180-day never-recalled). Read-only — never modifies files.
 - **Benchmark Framework** — `bun run benchmark` runs 5 test suites (Dedup, Recall, Conflict, ExtractionPipeline, Forgetting) in Mock mode with strict + adversarial dual-mode executors. Reports JSON/Markdown/Console.
-- **Evaluation Layer** — Independent evaluation primitives (fingerprint, scoring, comparison, metrics, types) shared by Audit and Benchmark. No circular dependencies.
-- **CLI Tools** — `scripts/audit-cli.ts` and `scripts/benchmark-cli.ts` with `--json`, `--scope`, `--suite`, `--format` flags
+- **Golden Benchmark** (v0.3.1) — `bun run benchmark --mode golden` runs 50 golden dataset cases with semantic comparison scoring. Reports Memory Intelligence Score.
+- **Memory Quality Score** (v0.3.1) — `bun run quality` evaluates 5 dimensions (Completeness, Consistency, Freshness, Noise, Retrievability) and outputs overall quality score 0-100.
+- **Semantic Comparator** (v0.3.1) — 3-layer text comparison (Token Jaccard 20% + TF-IDF 50% + Bigram 30%) with CJK support + field-weighted memory comparison (content 50%, description 20%, type 20%, name 10%).
+- **Evaluation Layer** — Independent evaluation primitives (fingerprint, scoring, comparison, metrics, types) shared by Audit, Benchmark, and Quality modules. No circular dependencies.
+- **CLI Tools** — `scripts/audit-cli.ts`, `scripts/benchmark-cli.ts`, `scripts/quality-cli.ts` with `--json`, `--scope`, `--suite`, `--mode`, `--format` flags
 
 ## Architecture
 
@@ -54,11 +57,13 @@ src/
 ├── extraction.ts         KAIROS extraction: validator + fingerprint + semantic description + explicit feedback + candidates
 ├── extraction-validator.ts  4-layer quality gate (schema/section/placeholder/length) — pure, no I/O
 ├── evaluation/           Shared evaluation primitives (v0.3+)
-│   ├── types.ts          EvaluationResult, EvaluationContext — unified across audit/benchmark
+│   ├── types.ts          EvaluationResult, EvaluationContext
 │   ├── metrics.ts        Pure math: precision, recallAtK, f1, reductionRate
-│   ├── fingerprint.ts    TF-IDF keyword extraction + Jaccard similarity (migrated from src/)
-│   ├── scoring.ts        scoreMemory extracted from recall.ts — keyword matching + type bonus + recency
-│   └── comparison.ts     SemanticComparator<T> + TokenJaccardComparator + ArrayOverlapComparator
+│   ├── fingerprint.ts    TF-IDF keyword extraction + Jaccard similarity
+│   ├── scoring.ts        scoreMemory extracted from recall.ts
+│   ├── comparison.ts     SemanticComparator + DefaultMemoryComparator (3-layer + field-weighted, v0.3.1)
+│   ├── quality.ts        5 dimension check functions (v0.3.1)
+│   └── quality-score.ts  MemoryQualityEvaluator + QualityReport (v0.3.1)
 ├── audit/                Read-only memory health scanner (v0.3+)
 │   ├── index.ts          MemoryAuditService — plugin-pattern analyzer orchestration
 │   ├── report.ts         AuditReport generation + JSON/Markdown/Console formatters
@@ -93,12 +98,14 @@ benchmark/                Project-root test harness (not in src/, not packaged)
 ├── metrics.ts            Metric<T> implementations (Dedup, Recall@K, Conflict, F1, Obsolete)
 ├── reporter.ts           BenchmarkReport generation → reports/benchmark/latest.json
 ├── executor/mock.ts      Mock executor: strict (returns expected) + adversarial (returns garbage)
+├── executor/golden.ts    Golden executor: runtime + comparator (v0.3.1)
 ├── suites/               5 suite implementations (dedup, recall, conflict, extraction_pipeline, forgetting)
-└── data/                 11 benchmark cases with real-session-style data
+└── data/                 11 mock + 50 golden benchmark cases (v0.3.1)
 
 scripts/                  CLI entry points (v0.3+)
 ├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
-└── benchmark-cli.ts      bun run benchmark [--suite X] [--json] [--adversarial]
+├── benchmark-cli.ts      bun run benchmark [--suite X] [--mode golden] [--json] [--adversarial]
+└── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
 ```
 
 ### Memory Pipeline
@@ -256,7 +263,7 @@ Memory body content...
 ## Testing
 
 ```bash
-# Run all unit + integration tests (258 tests, 34 files)
+# Run all unit + integration tests (350 tests, 43 files)
 bun test test/chain.test.ts test/candidate.test.ts test/config-pressure.test.ts \
      test/cursor.test.ts test/dream-prepare.test.ts test/entry-delete.test.ts \
      test/explicit-feedback.test.ts test/extraction-validator.test.ts \
@@ -267,9 +274,14 @@ bun test test/chain.test.ts test/candidate.test.ts test/config-pressure.test.ts 
      test/state-pressure.test.ts test/staleness.test.ts test/telemetry.test.ts \
      test/tools.test.ts test/transient-filter.test.ts \
      test/evaluation/fingerprint.test.ts test/evaluation/scoring.test.ts \
+     test/evaluation/comparison.test.ts test/evaluation/comparison-extra.test.ts \
+     test/evaluation/quality-score.test.ts test/evaluation/quality-score-extra.test.ts \
      test/audit/duplicate.test.ts test/audit/conflict.test.ts \
      test/audit/quality.test.ts test/audit/staleness.test.ts \
-     test/benchmark/runner.test.ts test/benchmark/metrics.test.ts
+     test/benchmark/runner.test.ts test/benchmark/metrics.test.ts \
+     test/benchmark/golden.test.ts test/benchmark/golden-extra.test.ts \
+     test/benchmark/reporter.test.ts test/benchmark/dataset.test.ts \
+     test/integration-v031.test.ts
 
 # Run individual suites
 bun test test/extraction-validator.test.ts   # 4-layer quality gate (10 tests)
@@ -300,9 +312,15 @@ bun run audit --scope user                   # scan user scope only
 bun run benchmark                            # all suites, mock mode
 bun run benchmark --suite dedup              # specific suite only
 bun run benchmark --adversarial              # adversarial mock (tests defense)
+bun run benchmark --mode golden              # golden mode with semantic comparison (v0.3.1)
+
+# Quality CLI — memory quality scoring (v0.3.1)
+bun run quality                              # scan project memory, console output
+bun run quality --json                        # JSON to stdout
+bun run quality --scope all                   # scan both user + project scopes
 ```
 
-258 tests total across 34 files, 257 passing (1 C1 timeout requires live OpenCode instance).
+350 tests total across 43 files, 349 passing (1 C1 timeout requires live OpenCode instance).
 
 ## Design Principles
 
@@ -388,6 +406,32 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.3.1 — Memory Quality Regression & Intelligence Benchmark (2026-07-15)
+
+**Semantic Comparator**
+- `DefaultMemoryComparator` with 3-layer text comparison: Token Jaccard (20%) + TF-IDF keyword (50%) + Character bigram (30%)
+- CJK-aware tokenization (2-char bigram tokens for Chinese text)
+- `compareMemory` field-weighted comparison: content (50%), description (20%), type (20%), name (10%)
+- `ComparisonResult` with per-field scores and pass threshold
+
+**Golden Benchmark Framework**
+- `GoldenExecutor` wraps runtime executor + semantic comparator
+- `GoldenCase` interface extends `BenchmarkCase` with model/reviewer/createdAt metadata
+- 50 golden dataset cases: Extraction (15), Recall (15), Dedup (8), Conflict (7), Forgetting (5)
+- `BenchmarkReport` upgraded: `intelligence_score` + per-suite score breakdown + v0.3.1 version
+
+**Memory Quality Score**
+- `MemoryQualityEvaluator` with 5 dimensions: Completeness (20%), Consistency (25%), Freshness (15%), Noise (20%), Retrievability (20%)
+- `QualityReport` with overall score and per-dimension breakdown
+- Pure dimension functions (no I/O, no side effects)
+
+**CLI Tools**
+- `bun run quality` — scan memory, output 5-dimension quality report
+- `bun run benchmark --mode golden` — run golden benchmark with semantic comparison
+- Flags: `--json`, `--scope`, `--mode golden`
+
+**Test growth:** 258 → 350 tests (+92), 43 files, 0 regressions
 
 ### v0.3.0 — Memory Observability & Evaluation Foundation (2026-07-15)
 

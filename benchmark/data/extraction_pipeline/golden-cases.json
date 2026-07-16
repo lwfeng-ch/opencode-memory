@@ -1,0 +1,247 @@
+[
+  {
+    "id": "golden-extract-001",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "我正在使用YOLOv11训练风机叶片检测" }
+      ]
+    },
+    "expected": {
+      "content": "User is developing a YOLOv11 model for wind turbine blade defect detection.",
+      "name": "YOLOv11 Detection Project",
+      "type": "project"
+    },
+    "metadata": {
+      "model": "golden-v0.3.1",
+      "createdAt": "2026-07-15T00:00:00Z",
+      "reviewer": "spec",
+      "description": "Chinese YOLOv11 project mention"
+    }
+  },
+  {
+    "id": "golden-extract-002",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "I'm a senior Go engineer specializing in backend development." }
+      ]
+    },
+    "expected": {
+      "content": "User is a senior Go engineer who specializes in backend development.",
+      "name": "User Role",
+      "type": "user"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "User role extraction" }
+  },
+  {
+    "id": "golden-extract-003",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "Always use pytest for testing, never use unittest." }
+      ]
+    },
+    "expected": {
+      "content": "User prefers pytest for testing and avoids unittest.",
+      "name": "Testing Framework Preference",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Explicit feedback signal" }
+  },
+  {
+    "id": "golden-extract-004",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "我们的项目截止日期是下周五，需要完成API集成" }
+      ]
+    },
+    "expected": {
+      "content": "Project deadline is next Friday for API integration completion.",
+      "name": "API Integration Deadline",
+      "type": "project"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Chinese project deadline" }
+  },
+  {
+    "id": "golden-extract-005",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "The CI dashboard is at https://grafana.internal/d/overview" }
+      ]
+    },
+    "expected": {
+      "content": "CI dashboard is available at https://grafana.internal/d/overview",
+      "name": "CI Dashboard URL",
+      "type": "reference"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "External reference URL" }
+  },
+  {
+    "id": "golden-extract-006",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "No, don't use jQuery anymore. We've moved to React." }
+      ]
+    },
+    "expected": {
+      "content": "User has migrated from jQuery to React and prefers not to use jQuery.",
+      "name": "jQuery to React Migration",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Correction feedback" }
+  },
+  {
+    "id": "golden-extract-007",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "Yes, exactly! Keep using the repository pattern for data access." }
+      ]
+    },
+    "expected": {
+      "content": "User confirms using the repository pattern for data access.",
+      "name": "Repository Pattern Confirmation",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Confirmation feedback" }
+  },
+  {
+    "id": "golden-extract-008",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "记住，我们的数据库从MySQL迁移到了PostgreSQL" }
+      ]
+    },
+    "expected": {
+      "content": "Database has migrated from MySQL to PostgreSQL.",
+      "name": "Database Migration",
+      "type": "project"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Explicit Chinese memory signal" }
+  },
+  {
+    "id": "golden-extract-009",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "I'm working on a microservices architecture using gRPC for inter-service communication, and we deploy on Kubernetes." }
+      ]
+    },
+    "expected": {
+      "content": "Project uses microservices architecture with gRPC for inter-service communication and Kubernetes deployment.",
+      "name": "Microservices Architecture",
+      "type": "project"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Multi-topic extraction" }
+  },
+  {
+    "id": "golden-extract-010",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "Our team lead Alice decided to use Redis for caching instead of Memcached." }
+      ]
+    },
+    "expected": {
+      "content": "Team lead Alice chose Redis for caching over Memcached.",
+      "name": "Caching Technology Choice",
+      "type": "project"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Team member decision" }
+  },
+  {
+    "id": "golden-extract-011",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "The monitoring stack is at https://prometheus.internal:9090/graph" }
+      ]
+    },
+    "expected": {
+      "content": "Prometheus monitoring is available at https://prometheus.internal:9090/graph",
+      "name": "Prometheus Monitoring URL",
+      "type": "reference"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Monitoring reference" }
+  },
+  {
+    "id": "golden-extract-012",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "I always write tests first, TDD is the way to go." }
+      ]
+    },
+    "expected": {
+      "content": "User practices test-driven development (TDD) and writes tests first.",
+      "name": "TDD Preference",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Coding preference" }
+  },
+  {
+    "id": "golden-extract-013",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "Stop using console.log for debugging, use the debugger instead." }
+      ]
+    },
+    "expected": {
+      "content": "User prefers using debugger over console.log for debugging.",
+      "name": "Debugging Method Preference",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Debugging approach correction" }
+  },
+  {
+    "id": "golden-extract-014",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "We decided to use event-driven architecture with Kafka for our event sourcing system." }
+      ]
+    },
+    "expected": {
+      "content": "Architecture decision: event-driven with Kafka for event sourcing.",
+      "name": "Event-Driven Architecture Decision",
+      "type": "project"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Architecture decision" }
+  },
+  {
+    "id": "golden-extract-015",
+    "version": "0.3.1",
+    "suite": "extraction_pipeline",
+    "input": {
+      "messages": [
+        { "role": "user", "content": "I prefer immutable data structures and functional programming patterns in TypeScript." }
+      ]
+    },
+    "expected": {
+      "content": "User prefers immutable data structures and functional programming in TypeScript.",
+      "name": "Functional Programming Preference",
+      "type": "feedback"
+    },
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Programming paradigm preference" }
+  }
+]

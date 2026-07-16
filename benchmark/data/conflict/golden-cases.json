@@ -1,0 +1,93 @@
+[
+  {
+    "id": "golden-conflict-001",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "项目使用TensorFlow作为深度学习框架" },
+        { "content": "项目已经从TensorFlow迁移到PyTorch" }
+      ]
+    },
+    "expected": "PyTorch",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "TensorFlow to PyTorch migration" }
+  },
+  {
+    "id": "golden-conflict-002",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "The API uses REST architecture for all endpoints." },
+        { "content": "We have migrated all API endpoints from REST to GraphQL." }
+      ]
+    },
+    "expected": "GraphQL",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "REST to GraphQL migration" }
+  },
+  {
+    "id": "golden-conflict-003",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "The codebase is written in JavaScript with Node.js runtime." },
+        { "content": "We have fully migrated the codebase from JavaScript to TypeScript." }
+      ]
+    },
+    "expected": "TypeScript",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "JavaScript to TypeScript migration" }
+  },
+  {
+    "id": "golden-conflict-004",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "The project uses MySQL as the primary database." },
+        { "content": "The project has migrated from MySQL to PostgreSQL for better JSON support." }
+      ]
+    },
+    "expected": "PostgreSQL",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "MySQL to PostgreSQL migration" }
+  },
+  {
+    "id": "golden-conflict-005",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "The application is built as a monolith with a single codebase." },
+        { "content": "We have decomposed the monolith into microservices for better scalability." }
+      ]
+    },
+    "expected": "microservices",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Monolith to microservices" }
+  },
+  {
+    "id": "golden-conflict-006",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "The frontend uses Vue 2 with the Options API." },
+        { "content": "We have upgraded the frontend from Vue 2 to Vue 3 with the Composition API." }
+      ]
+    },
+    "expected": "Vue 3",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Vue 2 to Vue 3 upgrade" }
+  },
+  {
+    "id": "golden-conflict-007",
+    "version": "0.3.1",
+    "suite": "conflict",
+    "input": {
+      "memories": [
+        { "content": "Deployment uses Docker containers on a single VM." },
+        { "content": "We have migrated deployment from Docker on VM to Kubernetes cluster for orchestration." }
+      ]
+    },
+    "expected": "Kubernetes",
+    "metadata": { "model": "golden-v0.3.1", "createdAt": "2026-07-15T00:00:00Z", "reviewer": "spec", "description": "Docker to Kubernetes migration" }
+  }
+]
