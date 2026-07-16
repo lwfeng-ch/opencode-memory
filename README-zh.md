@@ -426,6 +426,12 @@ MIT
 - `bun run benchmark --mode golden` — 运行 golden 基准测试，语义比较评分
 - 参数：`--json`、`--scope`、`--mode golden`
 
+**自审查修复** (commit `59b4a15`)
+- `GoldenExecutor`：移除冗余 `threshold` 字段——单一阈值源来自 comparator 的 `passed` 标记
+- `BenchmarkReport`：`benchmarks` 数组标记 `@deprecated`，从 `suites` Record 派生——单一数据源
+- `checkConsistency`：分桶优化 O(n·k)，范围 `[s - floor(s/4), s + floor(s/4)]`（最小 ±1）——比 O(n²) 快 11 倍，Jaccard=0.8 边界无漏报
+- `extractKeywords`：版本号类 token（`Python 3.10`）保留为单一 token（`3_10`）——`3.10` 不再误判为 `3.11` 的重复
+
 **测试增长：** 258 → 350 项（+92），43 个文件，0 回归
 
 ### v0.3.0 — 记忆可观测性与评估基础 (2026-07-15)

@@ -431,6 +431,12 @@ MIT
 - `bun run benchmark --mode golden` — run golden benchmark with semantic comparison
 - Flags: `--json`, `--scope`, `--mode golden`
 
+**Self-Review Fixes** (commit `59b4a15`)
+- `GoldenExecutor`: removed redundant `threshold` field — single threshold source via comparator's `passed` flag
+- `BenchmarkReport`: `benchmarks` array marked `@deprecated`, derived from `suites` Record — single data source
+- `checkConsistency`: bucket-optimized O(n·k) with range `[s - floor(s/4), s + floor(s/4)]` (min ±1) — 11x speedup over O(n²), no false negatives at Jaccard=0.8 boundary
+- `extractKeywords`: version-like tokens (`Python 3.10`) preserved as single token (`3_10`) — `3.10` no longer false-positive-duplicates `3.11`
+
 **Test growth:** 258 → 350 tests (+92), 43 files, 0 regressions
 
 ### v0.3.0 — Memory Observability & Evaluation Foundation (2026-07-15)

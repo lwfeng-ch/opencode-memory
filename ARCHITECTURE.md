@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.3.0 | **Last Updated**: 2026-07-15 | **Tests**: 258 pass / 34 files
+> **Version**: 0.3.1 | **Last Updated**: 2026-07-16 | **Tests**: 349 pass / 43 files (1 C1 SDK timeout pre-existing)
 
 ## Table of Contents
 
