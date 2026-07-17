@@ -20,6 +20,7 @@ import { createMockExecutor, type MockMode } from "../benchmark/executor/mock.js
 import { GoldenExecutor, type GoldenCase } from "../benchmark/executor/golden.js"
 import { DefaultMemoryComparator, type ComparableMemory } from "../src/evaluation/comparison.js"
 import { writeFile, mkdir } from "node:fs/promises"
+import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 // v0.3.2 imports
@@ -164,7 +165,7 @@ function getGitCommit(): string {
 
 function getPackageVersion(): string {
   try {
-    const pkg = require("../../package.json")
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8"))
     return pkg.version ?? "0.0.0"
   } catch {
     return "0.0.0"

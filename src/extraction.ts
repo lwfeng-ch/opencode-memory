@@ -30,6 +30,7 @@ import { shouldMerge } from "./evaluation/fingerprint.js"
 import { readMessages } from "./message-cache.js"
 import { detectExplicitFeedback, buildExplicitFeedbackMemory } from "./explicit-feedback.js"
 import { detectStructuredObservations, buildCandidateMemory, getCandidateDir } from "./candidate.js"
+import { validateCandidate, validateExtractionOutput } from "./extraction-validator.js"
 import type { ModelProvider } from "./llm/provider.js"
 
 // ---------------------------------------------------------------------------
@@ -496,7 +497,6 @@ export async function extractMemories(
   // 5. Validate candidates
   let validated = memories
   if (options?.enableValidation !== false) {
-    const { validateCandidate } = await import("./extraction-validator.js")
     validated = memories.filter((m) => validateCandidate(m).valid)
   }
 
@@ -1270,7 +1270,6 @@ export async function extractSessionMemory(
     const { name, description, body: responseBody } = parseSemanticFrontmatter(responseText)
 
     // Validate the body (without frontmatter)
-    const { validateExtractionOutput } = await import("./extraction-validator.js")
     const validation = validateExtractionOutput(responseBody)
     if (!validation.valid) {
       const errorMsg = `Extraction output validation failed: ${validation.errors.join("; ")}`

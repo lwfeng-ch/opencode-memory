@@ -363,9 +363,14 @@ export class DefaultMemoryComparator implements MemoryComparator {
           score: hybridScore,
           breakdown: { tokenJaccard, tfidf, bigram, embedding: embeddingScore },
         }
-      } catch {
+      } catch (err) {
         // Embedding failed — fallback to 3-layer
-        // Caller should emit telemetry { event: "embedding_failed", ... }
+        // Log warning so benchmark score drops are traceable to embedding failure
+        if (typeof console !== "undefined" && console.warn) {
+          console.warn(
+            `[opencode-memory] Embedding fallback: ${this.embeddingProvider?.embeddingModel ?? "unknown"} failed: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
       }
     }
 
