@@ -30,6 +30,77 @@ import { shouldMerge } from "./evaluation/fingerprint.js"
 import { readMessages } from "./message-cache.js"
 import { detectExplicitFeedback, buildExplicitFeedbackMemory } from "./explicit-feedback.js"
 import { detectStructuredObservations, buildCandidateMemory, getCandidateDir } from "./candidate.js"
+import type { ModelProvider } from "./llm/provider.js"
+
+// ---------------------------------------------------------------------------
+// v0.3.2: Core extraction types (side-effect-isolated)
+// ---------------------------------------------------------------------------
+
+/** Chat message with typed role. */
+export interface Message {
+  role: "system" | "user" | "assistant" | "tool"
+  content: string
+}
+
+/** Context that scopes the extraction (where/why/who). */
+export interface ExtractionContext {
+  project?: string
+  agent?: string
+  sessionId?: string
+  scope?: "user" | "project"
+}
+
+/** Observability metadata (who generated this, when). */
+export interface ExtractionMetadata {
+  source?: string
+  timestamp?: number
+  client?: string
+}
+
+/** Input to extractMemories(). Designed for forward extension. */
+export interface ExtractionInput {
+  messages: Message[]
+  context?: ExtractionContext
+  metadata?: ExtractionMetadata
+}
+
+/** Extraction configuration — affects output, must be cache-keyed. */
+export interface ExtractionOptions {
+  maxMemories?: number
+  confidenceThreshold?: number
+  enableValidation?: boolean
+  enableFingerprint?: boolean
+  fingerprintThreshold?: number
+  promotionMode?: string
+  promptVersion?: string
+}
+
+/** A single extracted memory candidate produced by extractMemories(). */
+export interface MemoryCandidate {
+  name: string
+  description: string
+  content: string
+  type: string
+  scope?: string
+  confidence: string
+  /** Optional provenance source identifier */
+  source?: string
+}
+
+/** Output of extractMemories(). */
+export interface ExtractionResult {
+  memories: MemoryCandidate[]
+  raw: string
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+  }
+  metadata?: {
+    model: string
+    durationMs: number
+    promptVersion: string
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Default template
@@ -281,6 +352,202 @@ function buildExtractionPrompt(
   ]
 
   return sections.join("\n")
+}
+
+// ---------------------------------------------------------------------------
+// v0.3.2: extractMemories() — side-effect-isolated core function
+// ---------------------------------------------------------------------------
+
+/**
+ * Default system prompt for memory extraction.
+ * Instructs the LLM to extract structured memory candidates from messages.
+ */
+const DEFAULT_EXTRACTION_SYSTEM_PROMPT = `You are a memory extraction system. Extract structured memories from the conversation below.
+
+Output a JSON array of memory objects. Each object must have exactly these fields:
+- name: short title (5-10 words, specific to the subject)
+- description: one-line hook for relevance matching (10-20 words)
+- content: detailed information preserving facts, context, and rationale
+- type: one of "user", "feedback", "project", "reference"
+- scope: one of "user" (cross-project) or "project" (this project only)
+- confidence: one of "explicit" (explicitly stated), "inferred" (you deduced), "uncertain" (not sure)
+
+Rules:
+- Only extract factual, non-trivial information that would be useful in a future conversation
+- Do NOT extract code patterns, function names, or build commands (derivable from codebase)
+- Do NOT extract git history (derivable from git)
+- Do NOT extract conversation ephemera like "ok", "let me check", "I see"
+- If nothing worth extracting, return an empty array []
+- Respond ONLY with the JSON array, no markdown, no explanation`
+
+/**
+ * Format messages into a simple text for the extraction prompt.
+ * Each section: "## Role\\ncontent"
+ */
+function formatMessagesForExtraction(messages: Message[]): string {
+  const lines: string[] = []
+  for (const msg of messages) {
+    const role = msg.role === "system" ? "System" : msg.role === "user" ? "User" : msg.role === "assistant" ? "Assistant" : "Tool"
+    const text = (msg.content ?? "").trim()
+    if (text.length > 0) {
+      lines.push(`## ${role}`)
+      lines.push(text)
+      lines.push("")
+    }
+  }
+  return lines.join("\n").trim()
+}
+
+/**
+ * Parse the LLM response into MemoryCandidate[].
+ * Supports both pure JSON arrays and JSON embedded in markdown code blocks.
+ */
+function parseExtractionResponse(raw: string): MemoryCandidate[] {
+  const trimmed = raw.trim()
+
+  // Try direct JSON parse first
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) {
+      return parsed as MemoryCandidate[]
+    }
+  } catch {
+    // Not pure JSON — try extracting from code block
+  }
+
+  // Try extracting JSON from markdown code block
+  const jsonMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1].trim())
+      if (Array.isArray(parsed)) {
+        return parsed as MemoryCandidate[]
+      }
+    } catch {
+      // Not valid JSON in code block
+    }
+  }
+
+  // Try to find any array-like structure in the text
+  const arrayMatch = trimmed.match(/\[[\s\S]*\]/)
+  if (arrayMatch) {
+    try {
+      const parsed = JSON.parse(arrayMatch[0])
+      if (Array.isArray(parsed)) {
+        return parsed as MemoryCandidate[]
+      }
+    } catch {
+      // Parse failed
+    }
+  }
+
+  return []
+}
+
+/**
+ * Extract memory candidates from conversation messages.
+ *
+ * Side-effect-isolated core function (副作用隔离核心函数):
+ * - Deterministic boundary with injected external dependency (CompletionProvider)
+ * - NOT a pure function (network side effects via provider.complete())
+ * - Same input + same provider + temp=0 → high determinism (not guaranteed)
+ *
+ * Pipeline:
+ *   Input → Build prompt → LLM call → Parse → Validate → Return candidates
+ *
+ * Does NOT:
+ *   - Read from / write to MemoryStore
+ *   - Track cursor offsets
+ *   - Emit telemetry events
+ *   - Manage session state
+ *   - Touch file IO
+ */
+export async function extractMemories(
+  input: ExtractionInput,
+  provider: ModelProvider,
+  options?: ExtractionOptions,
+): Promise<ExtractionResult> {
+  const t0 = Date.now()
+  const promptVersion = options?.promptVersion ?? "extract-v1"
+
+  // 1. Build system prompt
+  const systemPrompt = DEFAULT_EXTRACTION_SYSTEM_PROMPT
+
+  // 2. Build user prompt (serialize messages)
+  const conversationText = formatMessagesForExtraction(input.messages)
+  const userPrompt = [
+    "Extract memories from this conversation:",
+    "",
+    conversationText,
+  ].join("\n")
+
+  // 3. Call provider
+  const result = await provider.complete({
+    systemPrompt,
+    userPrompt,
+    model: provider.model,
+    temperature: 0,
+    maxTokens: options?.maxMemories ? Math.min(options.maxMemories * 500, 4096) : 2048,
+  })
+
+  // 4. Parse LLM response
+  const memories = parseExtractionResponse(result.content)
+
+  // 5. Validate candidates
+  let validated = memories
+  if (options?.enableValidation !== false) {
+    const { validateCandidate } = await import("./extraction-validator.js")
+    validated = memories.filter((m) => validateCandidate(m).valid)
+  }
+
+  // 6. Apply fingerprint dedup (if enabled)
+  let finalMemories = validated
+  if (options?.enableFingerprint && validated.length > 1) {
+    const threshold = options.fingerprintThreshold ?? 0.8
+
+    const merged: MemoryCandidate[] = []
+    for (const candidate of validated) {
+      let mergedWithExisting = false
+      for (let i = 0; i < merged.length; i++) {
+        if (shouldMerge(merged[i].content, candidate.content, threshold)) {
+          const confidenceRank: Record<string, number> = { explicit: 3, observed: 2, inferred: 1, uncertain: 0 }
+          const existingRank = confidenceRank[merged[i].confidence] ?? 0
+          const newRank = confidenceRank[candidate.confidence] ?? 0
+          if (newRank > existingRank) {
+            merged[i] = candidate
+          }
+          mergedWithExisting = true
+          break
+        }
+      }
+      if (!mergedWithExisting) {
+        merged.push(candidate)
+      }
+    }
+    finalMemories = merged
+  }
+
+  // 7. Apply maxMemories cap
+  if (options?.maxMemories && finalMemories.length > options.maxMemories) {
+    finalMemories = finalMemories.slice(0, options.maxMemories)
+  }
+
+  // Apply confidence threshold
+  if (options?.confidenceThreshold !== undefined) {
+    const confidenceValues: Record<string, number> = { explicit: 1.0, observed: 0.75, inferred: 0.5, uncertain: 0.1 }
+    finalMemories = finalMemories.filter((m) => (confidenceValues[m.confidence] ?? 0) >= options.confidenceThreshold!)
+  }
+
+  return {
+    memories: finalMemories,
+    raw: result.content,
+    usage: result.usage,
+    metadata: {
+      model: provider.model,
+      durationMs: Date.now() - t0,
+      promptVersion,
+    },
+  }
 }
 
 // ---------------------------------------------------------------------------

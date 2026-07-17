@@ -88,7 +88,7 @@ export class GoldenExecutor {
       const start = Date.now()
       try {
         const actual = await this.runtime(case_.input)
-        const comparison = this.compareExpected(case_.expected, actual)
+        const comparison = await this.compareExpected(case_.expected, actual)
         results.push({
           caseId: case_.id,
           suite: case_.suite,
@@ -120,22 +120,23 @@ export class GoldenExecutor {
    * Detects ComparableMemory objects and uses compareMemory;
    * falls back to compareText for plain strings/objects.
    */
-  private compareExpected(expected: unknown, actual: unknown): ComparisonResult {
+  private async compareExpected(expected: unknown, actual: unknown): Promise<ComparisonResult> {
     if (isComparableMemory(expected) && isComparableMemory(actual)) {
-      return this.comparator.compareMemory(expected, actual)
+      return await this.comparator.compareMemory(expected, actual)
     }
 
     // Fall back to text comparison
     const expectedStr = typeof expected === "string" ? expected : JSON.stringify(expected)
     const actualStr = typeof actual === "string" ? actual : JSON.stringify(actual)
-    const score = this.comparator.compareText(expectedStr, actualStr)
+    const result = await this.comparator.compareText(expectedStr, actualStr)
 
     // For text fallback, use a default threshold of 0.8 since the comparator
     // only exposes threshold through compareMemory's ComparisonResult
     return {
-      score,
-      fields: { content: score, name: 0, description: 0, type: 0 },
-      passed: score >= 0.8,
+      score: result.score,
+      fields: { content: result, name: 0, description: 0, type: 0 },
+      passed: result.score >= 0.8,
+      mode: result.breakdown.embedding !== undefined ? "hybrid-4layer" : "legacy-3layer",
     }
   }
 }

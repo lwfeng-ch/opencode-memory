@@ -3,18 +3,29 @@
  *
  * v0.3.0: SemanticComparator<T> interface, TokenJaccardComparator, ArrayOverlapComparator
  * v0.3.1: DefaultMemoryComparator — 3-layer text comparison + field-weighted memory comparison
+ * v0.3.2: HybridComparator — 4-layer (3-layer + Embedding 35%) with fallback to 3-layer
  *
- * Three-layer algorithm for compareText:
- *   Layer 1 (20%): Token Jaccard — word-level set overlap (CJK bigram tokens)
- *   Layer 2 (50%): TF-IDF keyword Jaccard — weighted keyword set overlap
- *   Layer 3 (30%): Character bigram Jaccard — fine-grained substring overlap
+ * Hybrid-4Layer algorithm for compareText (when embedding available):
+ *   Layer 1 (15%): Token Jaccard — word-level set overlap (CJK bigram tokens)
+ *   Layer 2 (35%): TF-IDF keyword Jaccard — weighted keyword set overlap
+ *   Layer 3 (15%): Character bigram Jaccard — fine-grained substring overlap
+ *   Layer 4 (35%): Embedding cosine similarity — semantic equivalence
+ *
+ * Legacy-3Layer algorithm (embedding unavailable or failed):
+ *   Layer 1 (20%): Token Jaccard
+ *   Layer 2 (50%): TF-IDF keyword Jaccard
+ *   Layer 3 (30%): Character bigram Jaccard
  *
  * Field-weighted algorithm for compareMemory:
  *   content (50%), description (20%), type (20%), name (10%)
+ *   content uses compareText (contains embedding signal)
+ *   type uses exact match (1 or 0)
+ *   name, description use lexical 3-layer only
  */
 
 import type { EvaluationResult } from "./types.js"
 import { jaccardSimilarity } from "./fingerprint.js"
+import type { EmbeddingProvider } from "../llm/provider.js"
 
 // ---------------------------------------------------------------------------
 // v0.3.0: Existing SemanticComparator<T> interface + implementations
@@ -76,7 +87,25 @@ export class ArrayOverlapComparator<T> implements SemanticComparator<T[]> {
 }
 
 // ---------------------------------------------------------------------------
-// v0.3.1: Enhanced comparison types + DefaultMemoryComparator
+// v0.3.2: TextComparisonResult — per-layer breakdown for explainability
+// ---------------------------------------------------------------------------
+
+/** Per-layer breakdown of text comparison. */
+export interface TextComparisonResult {
+  /** Weighted final score (0-1) */
+  score: number
+  /** Per-layer scores for explainability */
+  breakdown: {
+    tokenJaccard: number
+    tfidf: number
+    bigram: number
+    /** Present only if embedding was used (hybrid-4layer mode) */
+    embedding?: number
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v0.3.1+ Enhanced comparison types
 // ---------------------------------------------------------------------------
 
 /** A memory object with comparable fields. */
@@ -85,31 +114,45 @@ export interface ComparableMemory {
   description?: string
   content: string
   type?: string
+  /** Optional metadata — NOT used in score calculation (v0.3.2) */
+  metadata?: {
+    scope?: string
+    confidence?: string
+    source?: string
+  }
 }
 
 /** Result of comparing two memory objects. */
 export interface ComparisonResult {
   /** Overall similarity score 0.0–1.0 */
   score: number
-  /** Per-field similarity scores */
+  /** Per-field results */
   fields: {
-    content: number
+    /** Content uses TextComparisonResult (contains embedding breakdown) */
+    content: TextComparisonResult
+    /** Name uses lexical score only */
     name: number
+    /** Description uses lexical score only */
     description: number
+    /** Type uses exact match (1 or 0) */
     type: number
   }
-  /** Whether score >= threshold (default 0.8) */
+  /** Whether score >= threshold */
   passed: boolean
+  /** Comparator mode used for this comparison */
+  mode: "hybrid-4layer" | "legacy-3layer"
 }
 
-/** Interface for the enhanced v0.3.1 comparator. */
+/** Interface for the enhanced comparator (v0.3.2: async for embedding support). */
 export interface MemoryComparator {
-  compareText(a: string, b: string): number
-  compareMemory(expected: ComparableMemory, actual: ComparableMemory): ComparisonResult
+  /** Compare two text strings. Returns breakdown. */
+  compareText(a: string, b: string): Promise<TextComparisonResult>
+  /** Compare two memory objects. Field-weighted. */
+  compareMemory(expected: ComparableMemory, actual: ComparableMemory): Promise<ComparisonResult>
 }
 
 // ---------------------------------------------------------------------------
-// Tokenization helpers (CJK-aware)
+// Tokenization helpers (CJK-aware) — unchanged from v0.3.1
 // ---------------------------------------------------------------------------
 
 const PUNCT_SPLIT = /[\s,.!?,;:。，！？、；：·\-_\/\\()（）\[\]"'`]+/
@@ -186,69 +229,168 @@ function extractBigrams(text: string): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
-// DefaultMemoryComparator — 3-layer text + field-weighted memory comparison
+// v0.3.2: cosineSimilarity — pure function for embedding comparison
 // ---------------------------------------------------------------------------
 
 /**
- * Default implementation of MemoryComparator.
+ * Cosine similarity between two equal-length vectors. Returns 0-1.
+ * @throws Error if dimensions mismatch
+ */
+export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error(`Dimension mismatch: ${a.length} vs ${b.length}`)
+  }
+  let dot = 0
+  let normA = 0
+  let normB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB)
+  if (denom === 0) return 0
+  return dot / denom
+}
+
+// ---------------------------------------------------------------------------
+// DefaultMemoryComparator — Hybrid-4Layer (v0.3.2) + fallback to 3-layer
+// ---------------------------------------------------------------------------
+
+/**
+ * Default implementation of MemoryComparator (v0.3.2: Hybrid-4Layer).
  *
- * compareText uses a 3-layer weighted algorithm:
- *   Layer 1 (20%): Token Jaccard — word/bigram-level set overlap
- *   Layer 2 (50%): TF-IDF keyword Jaccard — weighted keyword overlap
- *   Layer 3 (30%): Character bigram Jaccard — fine-grained substring overlap
+ * compareText uses a 3-layer or 4-layer weighted algorithm:
+ *   - 4-layer (embedding available): Token 15% + TF-IDF 35% + Bigram 15% + Embedding 35%
+ *   - 3-layer (fallback):             Token 20% + TF-IDF 50% + Bigram 30%
  *
- * compareMemory applies compareText to each field with weights:
- *   content 50%, description 20%, type 20%, name 10%
+ * compareMemory applies field-weighted comparison:
+ *   content (50%, uses compareText), type (20%, exact match),
+ *   description (20%, lexical), name (10%, lexical)
  *
- * Pass threshold: 0.8 (configurable)
+ * Embedding fallback: if EmbeddingProvider throws, falls back to 3-layer.
+ * Telemetry: embedding failures should be logged (caller responsibility).
+ *
+ * @param thresholdOrOpts - number for backward compat (v0.3.1 style),
+ *                          or { embeddingProvider?, threshold? } for v0.3.2
  */
 export class DefaultMemoryComparator implements MemoryComparator {
   private readonly threshold: number
+  private readonly embeddingProvider?: EmbeddingProvider
 
-  constructor(threshold: number = 0.8) {
-    this.threshold = threshold
+  // Weight configurations (reported in comparator metadata)
+  static readonly HYBRID_WEIGHTS = {
+    tokenJaccard: 0.15,
+    tfidf: 0.35,
+    bigram: 0.15,
+    embedding: 0.35,
+  }
+  static readonly LEGACY_WEIGHTS = {
+    tokenJaccard: 0.20,
+    tfidf: 0.50,
+    bigram: 0.30,
+  }
+  static readonly FIELD_WEIGHTS = {
+    content: 0.50,
+    description: 0.20,
+    type: 0.20,
+    name: 0.10,
   }
 
-  compareText(a: string, b: string): number {
+  constructor(
+    thresholdOrOpts?: number | { embeddingProvider?: EmbeddingProvider; threshold?: number },
+  ) {
+    if (typeof thresholdOrOpts === "number") {
+      this.threshold = thresholdOrOpts
+    } else if (thresholdOrOpts && typeof thresholdOrOpts === "object") {
+      this.threshold = thresholdOrOpts.threshold ?? 0.8
+      this.embeddingProvider = thresholdOrOpts.embeddingProvider
+    } else {
+      this.threshold = 0.8
+    }
+  }
+
+  async compareText(a: string, b: string): Promise<TextComparisonResult> {
     // Edge cases
-    if (!a && !b) return 0
-    if (!a || !b) return 0
-    if (a === b) return 1.0
+    if (!a && !b) return { score: 0, breakdown: { tokenJaccard: 0, tfidf: 0, bigram: 0 } }
+    if (!a || !b) return { score: 0, breakdown: { tokenJaccard: 0, tfidf: 0, bigram: 0 } }
+    if (a === b) {
+      return {
+        score: 1.0,
+        breakdown: this.embeddingProvider
+          ? { tokenJaccard: 1, tfidf: 1, bigram: 1, embedding: 1 }
+          : { tokenJaccard: 1, tfidf: 1, bigram: 1 },
+      }
+    }
 
     const lowerA = a.toLowerCase()
     const lowerB = b.toLowerCase()
-    if (lowerA === lowerB) return 1.0
+    if (lowerA === lowerB) {
+      return {
+        score: 1.0,
+        breakdown: this.embeddingProvider
+          ? { tokenJaccard: 1, tfidf: 1, bigram: 1, embedding: 1 }
+          : { tokenJaccard: 1, tfidf: 1, bigram: 1 },
+      }
+    }
 
-    // Layer 1: Token Jaccard (20%)
-    const tokensA = tokenize(lowerA)
-    const tokensB = tokenize(lowerB)
-    const layer1 = jaccardSimilarity(tokensA, tokensB)
+    // 3-layer lexical (always succeeds, synchronous computation)
+    const tokenJaccard = this.computeTokenJaccard(lowerA, lowerB)
+    const tfidf = this.computeTfidfJaccard(lowerA, lowerB)
+    const bigram = this.computeBigramJaccard(lowerA, lowerB)
 
-    // Layer 2: TF-IDF keyword Jaccard (50%)
-    const keywordsA = extractKeywordsForComparison(lowerA)
-    const keywordsB = extractKeywordsForComparison(lowerB)
-    const layer2 = jaccardSimilarity(keywordsA, keywordsB)
+    const lw = DefaultMemoryComparator.LEGACY_WEIGHTS
+    const lexicalScore =
+      tokenJaccard * lw.tokenJaccard +
+      tfidf * lw.tfidf +
+      bigram * lw.bigram
 
-    // Layer 3: Character bigram Jaccard (30%)
-    const bigramsA = extractBigrams(lowerA)
-    const bigramsB = extractBigrams(lowerB)
-    const layer3 = jaccardSimilarity(bigramsA, bigramsB)
+    // Embedding (optional, may fail)
+    if (this.embeddingProvider) {
+      try {
+        const [embA, embB] = await this.embeddingProvider.embed([a, b])
+        const embeddingScore = cosineSimilarity(embA, embB)
 
-    return layer1 * 0.2 + layer2 * 0.5 + layer3 * 0.3
+        // Recompute with hybrid weights
+        const hw = DefaultMemoryComparator.HYBRID_WEIGHTS
+        const hybridScore =
+          tokenJaccard * hw.tokenJaccard +
+          tfidf * hw.tfidf +
+          bigram * hw.bigram +
+          embeddingScore * hw.embedding
+
+        return {
+          score: hybridScore,
+          breakdown: { tokenJaccard, tfidf, bigram, embedding: embeddingScore },
+        }
+      } catch {
+        // Embedding failed — fallback to 3-layer
+        // Caller should emit telemetry { event: "embedding_failed", ... }
+      }
+    }
+
+    // Fallback: 3-layer only
+    return {
+      score: lexicalScore,
+      breakdown: { tokenJaccard, tfidf, bigram },
+    }
   }
 
-  compareMemory(expected: ComparableMemory, actual: ComparableMemory): ComparisonResult {
-    // Content: use compareText (highest weight)
-    const contentScore = this.compareText(expected.content, actual.content)
+  async compareMemory(
+    expected: ComparableMemory,
+    actual: ComparableMemory,
+  ): Promise<ComparisonResult> {
+    // Content: use compareText (highest weight, contains embedding signal)
+    const contentResult = await this.compareText(expected.content, actual.content)
 
-    // Name: use compareText if both present, else direct match
+    // Name: lexical 3-layer (no embedding — too short for embedding to help)
     const nameScore = expected.name != null && actual.name != null
-      ? this.compareText(expected.name, actual.name)
+      ? this.lexical3Layer(expected.name, actual.name)
       : (expected.name === actual.name ? 1.0 : 0)
 
-    // Description: use compareText if both present, else direct match
+    // Description: lexical 3-layer
     const descriptionScore = expected.description != null && actual.description != null
-      ? this.compareText(expected.description, actual.description)
+      ? this.lexical3Layer(expected.description, actual.description)
       : (expected.description === actual.description ? 1.0 : 0)
 
     // Type: exact match only
@@ -257,21 +399,62 @@ export class DefaultMemoryComparator implements MemoryComparator {
       : (expected.type === actual.type ? 1.0 : 0)
 
     const fields = {
-      content: contentScore,
+      content: contentResult,
       name: nameScore,
       description: descriptionScore,
       type: typeScore,
     }
 
     // Weighted: content 50%, description 20%, type 20%, name 10%
-    // Round to 10 decimal places to avoid floating-point precision issues
-    const rawScore = contentScore * 0.5 + descriptionScore * 0.2 + typeScore * 0.2 + nameScore * 0.1
+    const w = DefaultMemoryComparator.FIELD_WEIGHTS
+    const rawScore =
+      contentResult.score * w.content +
+      descriptionScore * w.description +
+      typeScore * w.type +
+      nameScore * w.name
     const score = Math.round(rawScore * 1e10) / 1e10
+
+    const mode = contentResult.breakdown.embedding !== undefined
+      ? "hybrid-4layer"
+      : "legacy-3layer"
 
     return {
       score,
       fields,
       passed: score >= this.threshold,
+      mode,
     }
+  }
+
+  // --- Private helpers ---
+
+  private computeTokenJaccard(a: string, b: string): number {
+    return jaccardSimilarity(tokenize(a), tokenize(b))
+  }
+
+  private computeTfidfJaccard(a: string, b: string): number {
+    return jaccardSimilarity(extractKeywordsForComparison(a), extractKeywordsForComparison(b))
+  }
+
+  private computeBigramJaccard(a: string, b: string): number {
+    return jaccardSimilarity(extractBigrams(a), extractBigrams(b))
+  }
+
+  /** Lexical 3-layer (synchronous, used for short fields like name/description). */
+  private lexical3Layer(a: string, b: string): number {
+    if (!a && !b) return 0
+    if (!a || !b) return 0
+    if (a === b) return 1.0
+
+    const lowerA = a.toLowerCase()
+    const lowerB = b.toLowerCase()
+    if (lowerA === lowerB) return 1.0
+
+    const tokenJaccard = this.computeTokenJaccard(lowerA, lowerB)
+    const tfidf = this.computeTfidfJaccard(lowerA, lowerB)
+    const bigram = this.computeBigramJaccard(lowerA, lowerB)
+
+    const lw = DefaultMemoryComparator.LEGACY_WEIGHTS
+    return tokenJaccard * lw.tokenJaccard + tfidf * lw.tfidf + bigram * lw.bigram
   }
 }

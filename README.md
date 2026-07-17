@@ -41,8 +41,17 @@ Inspired by Claude Code's memory pipeline and Qwen Code's fact-layer architectur
 - **Golden Benchmark** (v0.3.1) — `bun run benchmark --mode golden` runs 50 golden dataset cases with semantic comparison scoring. Reports Memory Intelligence Score.
 - **Memory Quality Score** (v0.3.1) — `bun run quality` evaluates 5 dimensions (Completeness, Consistency, Freshness, Noise, Retrievability) and outputs overall quality score 0-100.
 - **Semantic Comparator** (v0.3.1) — 3-layer text comparison (Token Jaccard 20% + TF-IDF 50% + Bigram 30%) with CJK support + field-weighted memory comparison (content 50%, description 20%, type 20%, name 10%).
+- **Hybrid-4Layer Comparator** (v0.3.2) — Embedding layer (35%) added to 3-layer lexical (65%), with automatic fallback to legacy-3layer on embedding failure. `TextComparisonResult` with per-layer breakdown for explainability. `cosineSimilarity` pure function.
+- **LLM Provider Abstraction** (v0.3.2) — `CompletionProvider` and `EmbeddingProvider` separated interfaces; `ModelProvider` for text generation. OpenAI + Qwen/DashScope implementations with retry logic and timeout.
+- **extractMemories()** (v0.3.2) — Side-effect-isolated core function: builds prompt, calls LLM, parses response, validates candidates, applies fingerprint dedup. Shared by production and benchmark — no store/adapter/IO dependency.
+- **Real Extraction Benchmark** (v0.3.2) — `bun run benchmark --mode real --provider qwen --model qwen3-14b --repeat 3` runs real LLM extraction against golden dataset. First real Memory Intelligence Score.
+- **Benchmark Cache** (v0.3.2) — `FileBenchmarkCache` with SHA-256 cache key including pipeline config, model params, runtime version, caseId, and repeatIndex (critical — without repeatIndex, repeat=3 hits same cache).
+- **Repeat Controller** (v0.3.2) — Suite-level repeat policies: extraction=3 (LLM variance), recall=1 (deterministic), dedup=3, conflict=3, forgetting=1. Total 110 calls for 50 golden cases.
+- **Statistics** (v0.3.2) — `computeStats` pure function: mean, stddev, 95% CI (normal approximation; Student-t planned for v0.3.3).
+- **LLM Trace Logger** (v0.3.2) — JSONL trace of LLM calls (requestId, model, latency, tokens, cacheHit) for cost/latency analysis.
+- **Benchmark Config** (v0.3.2) — Separate `benchmark.config.json` (not in memory.config.json); JSONC comment stripping, env var substitution ($VAR → process.env.VAR).
 - **Evaluation Layer** — Independent evaluation primitives (fingerprint, scoring, comparison, metrics, types) shared by Audit, Benchmark, and Quality modules. No circular dependencies.
-- **CLI Tools** — `scripts/audit-cli.ts`, `scripts/benchmark-cli.ts`, `scripts/quality-cli.ts` with `--json`, `--scope`, `--suite`, `--mode`, `--format` flags
+- **CLI Tools** — `scripts/audit-cli.ts`, `scripts/benchmark-cli.ts`, `scripts/quality-cli.ts` with `--json`, `--scope`, `--suite`, `--mode`, `--provider`, `--model`, `--repeat`, `--no-cache` flags
 
 ## Architecture
 
@@ -61,9 +70,13 @@ src/
 │   ├── metrics.ts        Pure math: precision, recallAtK, f1, reductionRate
 │   ├── fingerprint.ts    TF-IDF keyword extraction + Jaccard similarity
 │   ├── scoring.ts        scoreMemory extracted from recall.ts
-│   ├── comparison.ts     SemanticComparator + DefaultMemoryComparator (3-layer + field-weighted, v0.3.1)
+│   ├── comparison.ts     HybridComparator: 4-layer (3-layer + Embedding 35%) with fallback (v0.3.2), TextComparisonResult, cosineSimilarity
 │   ├── quality.ts        5 dimension check functions (v0.3.1)
 │   └── quality-score.ts  MemoryQualityEvaluator + QualityReport (v0.3.1)
+├── llm/                  LLM provider abstraction (v0.3.2)
+│   ├── provider.ts       CompletionProvider + EmbeddingProvider + ModelProvider interfaces
+│   ├── openai.ts          OpenAI completion + embedding (with retry, timeout)
+│   └── qwen.ts            Qwen/DashScope completion + BGE-M3 embedding (with retry, timeout)
 ├── audit/                Read-only memory health scanner (v0.3+)
 │   ├── index.ts          MemoryAuditService — plugin-pattern analyzer orchestration
 │   ├── report.ts         AuditReport generation + JSON/Markdown/Console formatters
@@ -93,18 +106,25 @@ src/
 └── fingerprint.ts        Re-export shim → evaluation/fingerprint.ts (deprecated, use new path)
 
 benchmark/                Project-root test harness (not in src/, not packaged)
-├── runner.ts             BenchmarkRunner — orchestrates case execution via executor
+├── runner.ts             BenchmarkRunner — orchestrates case execution via executor (v0.3.2: BenchmarkResult + stats fields)
 ├── dataset.ts            Dataset loader (JSON case files from data/)
 ├── metrics.ts            Metric<T> implementations (Dedup, Recall@K, Conflict, F1, Obsolete)
 ├── reporter.ts           BenchmarkReport generation → reports/benchmark/latest.json
+├── cache.ts             FileBenchmarkCache + NoopCache + computeCacheKey (v0.3.2)
+├── repeat.ts            RepeatController + suite-level RepeatPolicy (v0.3.2)
+├── stats.ts             computeStats: mean, stddev, CI95 (v0.3.2)
+├── trace.ts             LLMTraceLogger: JSONL trace (v0.3.2)
+├── config.ts            loadBenchmarkConfig: JSONC + env var substitution (v0.3.2)
+├── report-schema.ts     BenchmarkReport v0.3.2 schema + formatters (v0.3.2)
 ├── executor/mock.ts      Mock executor: strict (returns expected) + adversarial (returns garbage)
-├── executor/golden.ts    Golden executor: runtime + comparator (v0.3.1)
+├── executor/golden.ts    Golden executor: async runtime + HybridComparator (v0.3.1, updated v0.3.2)
+├── executor/extraction.ts ExtractionExecutor: wraps extractMemories() (v0.3.2)
 ├── suites/               5 suite implementations (dedup, recall, conflict, extraction_pipeline, forgetting)
 └── data/                 11 mock + 50 golden benchmark cases (v0.3.1)
 
 scripts/                  CLI entry points (v0.3+)
 ├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
-├── benchmark-cli.ts      bun run benchmark [--suite X] [--mode golden] [--json] [--adversarial]
+├── benchmark-cli.ts      bun run benchmark [--mode mock|golden|real] [--provider X] [--model Y] [--repeat N] [--no-cache] (v0.3.2)
 └── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
 ```
 
@@ -313,6 +333,8 @@ bun run benchmark                            # all suites, mock mode
 bun run benchmark --suite dedup              # specific suite only
 bun run benchmark --adversarial              # adversarial mock (tests defense)
 bun run benchmark --mode golden              # golden mode with semantic comparison (v0.3.1)
+bun run benchmark --mode real --provider qwen --model qwen3-14b --repeat 3  # real LLM (v0.3.2)
+bun run benchmark --mode real --no-cache     # real LLM without cache (v0.3.2)
 
 # Quality CLI — memory quality scoring (v0.3.1)
 bun run quality                              # scan project memory, console output
@@ -320,7 +342,7 @@ bun run quality --json                        # JSON to stdout
 bun run quality --scope all                   # scan both user + project scopes
 ```
 
-350 tests total across 43 files, 349 passing (1 C1 timeout requires live OpenCode instance).
+491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
 
 ## Design Principles
 
@@ -406,6 +428,56 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.3.2 — Memory Benchmark Reality Layer (2026-07-16)
+
+**LLM Provider Abstraction**
+- `CompletionProvider` + `EmbeddingProvider` separated interfaces (not all models support embedding)
+- `ModelProvider` extends `CompletionProvider` (no embedding implied — inject separately)
+- `OpenAIProvider` + `OpenAIEmbeddingProvider` — fetch-based, retry with exponential backoff, timeout
+- `QwenProvider` + `QwenEmbeddingProvider` — DashScope API, BGE-M3 embedding
+
+**extractMemories() Core Function**
+- Side-effect-isolated core: prompt build → LLM call → parse → validate → fingerprint dedup
+- No store/adapter/IO dependency — production and benchmark share same logic
+- `ExtractionInput` (messages + context + metadata) — forward-extensible for v0.4+ tool events
+- `ExtractionExecutor` wraps extractMemories() for benchmark use
+
+**Hybrid-4Layer Comparator**
+- 4-layer: Token Jaccard (15%) + TF-IDF (35%) + Bigram (15%) + Embedding (35%)
+- Fallback to legacy-3layer (20%+50%+30%) when embedding unavailable or fails
+- `TextComparisonResult` with per-layer breakdown for explainability
+- `cosineSimilarity` pure function
+- `ComparableMemory.metadata` optional field (not scored in v0.3.2)
+
+**Benchmark Cache + Repeat + Stats**
+- `FileBenchmarkCache` with SHA-256 cache key: pipeline + model + runtime + caseId + **repeatIndex** (critical — without repeatIndex, repeat=3 hits same cache)
+- `RepeatController` with suite-level policies: extraction=3, recall=1, dedup=3, conflict=3, forgetting=1 (110 total calls for 50 cases)
+- `computeStats` pure function: mean, stddev, 95% CI (normal approximation)
+- `LLMTraceLogger`: JSONL trace for cost/latency analysis
+
+**Benchmark Config + Report**
+- Separate `benchmark.config.json` (not in memory.config.json) — different lifecycles
+- `stripJsoncComments`: string-aware state machine (preserves URLs inside strings)
+- `substituteEnvVars`: `$VAR_NAME` → `process.env[VAR_NAME]`
+- `BenchmarkReport` v0.3.2 schema with model, comparator, cost, weights metadata
+
+**CLI Integration**
+- `--mode real` — real LLM extraction benchmark
+- `--provider` — openai / qwen / ollama
+- `--model` — model name override
+- `--repeat N` — repeat count override
+- `--no-cache` — disable cache
+
+**Self-Review Fixes (8 issues)**
+- OpenAI API: removed unsupported `top_k` parameter
+- Config: JSONC comment stripping now string-aware (preserves URLs)
+- Extraction: `confidenceValues` + `VALID_CONFIDENCE` — added missing `observed` level
+- Embedding providers: added retry logic (was missing in both OpenAI and Qwen)
+- Extraction: removed redundant dynamic import of `shouldMerge`
+- Config: clarified `as` + `??` operator precedence with parentheses
+
+**Test growth:** 373 → 491 tests (+118), 55 files, 0 regressions
 
 ### v0.3.1 — Memory Quality Regression & Intelligence Benchmark (2026-07-15)
 

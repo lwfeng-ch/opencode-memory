@@ -98,3 +98,53 @@ export function validateExtractionOutput(
 
   return { valid: errors.length === 0, errors }
 }
+
+// ---------------------------------------------------------------------------
+// v0.3.2: Per-candidate validation
+// ---------------------------------------------------------------------------
+
+const VALID_TYPES = ["user", "feedback", "project", "reference"]
+const VALID_CONFIDENCE = ["explicit", "observed", "inferred", "uncertain"]
+
+/**
+ * Validate a single memory candidate extracted from the LLM response.
+ *
+ * Checks:
+ *   1. name is present and non-empty
+ *   2. description is present and non-empty
+ *   3. content is present and non-empty
+ *   4. type is one of the valid memory types
+ *   5. confidence is one of the valid confidence levels
+ */
+export function validateCandidate(
+  candidate: { name?: string; description?: string; content?: string; type?: string; confidence?: string },
+): ValidationResult {
+  const errors: string[] = []
+
+  // 1. Name check
+  if (!candidate.name || candidate.name.trim().length === 0) {
+    errors.push("Candidate missing required field: name")
+  }
+
+  // 2. Description check
+  if (!candidate.description || candidate.description.trim().length === 0) {
+    errors.push("Candidate missing required field: description")
+  }
+
+  // 3. Content check
+  if (!candidate.content || candidate.content.trim().length === 0) {
+    errors.push("Candidate missing required field: content")
+  }
+
+  // 4. Type check
+  if (!candidate.type || !VALID_TYPES.includes(candidate.type)) {
+    errors.push(`Candidate type "${candidate.type}" is invalid; must be one of: ${VALID_TYPES.join(", ")}`)
+  }
+
+  // 5. Confidence check
+  if (!candidate.confidence || !VALID_CONFIDENCE.includes(candidate.confidence)) {
+    errors.push(`Candidate confidence "${candidate.confidence}" is invalid; must be one of: ${VALID_CONFIDENCE.join(", ")}`)
+  }
+
+  return { valid: errors.length === 0, errors }
+}

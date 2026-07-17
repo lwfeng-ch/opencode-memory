@@ -148,11 +148,11 @@ describe("v0.3.1 Integration — Golden benchmark end-to-end", () => {
   test("comparison engine detects semantic similarity in golden cases", async () => {
     const comparator = new DefaultMemoryComparator()
     // These two texts share semantic meaning but differ in wording
-    const score = comparator.compareText(
+    const result = await comparator.compareText(
       "User is a senior Go engineer",
       "User is a senior Go developer",
     )
     // Should detect some similarity (shared words: user, senior, go)
-    expect(score).toBeGreaterThan(0.3)
+    expect(result.score).toBeGreaterThan(0.3)
   })
 })

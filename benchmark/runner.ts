@@ -30,6 +30,25 @@ export interface BenchmarkResult {
   score: number
   durationMs: number
   error?: string
+  // v0.3.2 fields (optional — only populated in real mode)
+  /** Actual run count (when repeated) */
+  runs?: number
+  /** Per-run scores [0.82, 0.87, 0.79] */
+  scores?: number[]
+  /** Standard deviation across runs */
+  stddev?: number
+  /** 95% confidence interval [lower, upper] */
+  ci95?: [number, number]
+  /** How many runs hit cache */
+  cacheHits?: number
+  /** How many runs called LLM */
+  llmCalls?: number
+  /** Comparator mode used */
+  comparatorMode?: "hybrid-4layer" | "legacy-3layer"
+  /** Model name used */
+  modelUsed?: string
+  /** Token usage */
+  tokensUsed?: { input: number; output: number }
 }
 
 export interface BenchmarkExecutor {

@@ -41,8 +41,17 @@
 - **Golden 基准测试** (v0.3.1) — `bun run benchmark --mode golden` 运行 50 条 golden 数据集案例，使用语义比较评分。输出 Memory Intelligence Score
 - **记忆质量评分** (v0.3.1) — `bun run quality` 评估 5 个维度（完整性、一致性、新鲜度、噪声、可检索性），输出总体质量分 0-100
 - **语义比较器** (v0.3.1) — 三层文本比较（Token Jaccard 20% + TF-IDF 50% + Bigram 30%），支持中文 CJK + 字段权重记忆比较（content 50%, description 20%, type 20%, name 10%）
+- **混合四层比较器** (v0.3.2) — 在三层词汇匹配（65%）基础上增加 Embedding 层（35%），embedding 不可用时自动降级到三层。`TextComparisonResult` 含逐层评分，支持可解释性分析
+- **LLM Provider 抽象** (v0.3.2) — `CompletionProvider` 和 `EmbeddingProvider` 分离接口；`ModelProvider` 文本生成。OpenAI + Qwen/DashScope 实现，含重试和超时
+- **extractMemories() 核心函数** (v0.3.2) — 副作用隔离核心：构建 prompt → 调用 LLM → 解析 → 验证 → 指纹去重。生产与 benchmark 共享，无 store/adapter/IO 依赖
+- **真实提取基准测试** (v0.3.2) — `bun run benchmark --mode real --provider qwen --repeat 3` 用真实 LLM 跑 golden 数据集，产出首个真实 Memory Intelligence Score
+- **基准测试缓存** (v0.3.2) — `FileBenchmarkCache`，SHA-256 缓存键含 pipeline + model + runtime + caseId + **repeatIndex**（关键——无 repeatIndex 时 repeat=3 会命中同一缓存）
+- **重复控制器** (v0.3.2) — Suite 级策略：extraction=3（LLM 随机性）、recall=1（确定性）、dedup=3、conflict=3、forgetting=1。50 个 golden 案例共 110 次调用
+- **统计** (v0.3.2) — `computeStats` 纯函数：mean、stddev、95% CI（正态近似；Student-t 计划 v0.3.3）
+- **LLM Trace 日志** (v0.3.2) — JSONL 格式记录 LLM 调用（requestId、model、latency、tokens、cacheHit），用于成本/延迟分析
+- **基准测试配置** (v0.3.2) — 独立 `benchmark.config.json`（不在 memory.config.json 中）；JSONC 注释剥离、环境变量替换
 - **评估层** — 独立评价原语（fingerprint、scoring、comparison、metrics、types），Audit、Benchmark、Quality 共享，无循环依赖
-- **CLI 工具** — `scripts/audit-cli.ts`、`scripts/benchmark-cli.ts`、`scripts/quality-cli.ts`，支持 `--json`、`--scope`、`--suite`、`--mode`、`--format` 参数
+- **CLI 工具** — `scripts/audit-cli.ts`、`scripts/benchmark-cli.ts`、`scripts/quality-cli.ts`，支持 `--json`、`--scope`、`--suite`、`--mode`、`--provider`、`--model`、`--repeat`、`--no-cache` 参数
 
 ## 架构
 
@@ -401,6 +410,54 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact Layer 架构、recall-selection 概念、symlink 保护
 
 ## 更新日志
+
+### v0.3.2 — 记忆基准测试真实化层 (2026-07-16)
+
+**LLM Provider 抽象**
+- `CompletionProvider` + `EmbeddingProvider` 分离接口（不是所有模型都支持 embedding）
+- `ModelProvider` 继承 `CompletionProvider`（不隐含 embedding 能力——单独注入）
+- `OpenAIProvider` + `OpenAIEmbeddingProvider` — fetch 实现，指数退避重试，超时
+- `QwenProvider` + `QwenEmbeddingProvider` — DashScope API，BGE-M3 embedding
+
+**extractMemories() 核心函数**
+- 副作用隔离核心：构建 prompt → 调用 LLM → 解析 → 验证 → 指纹去重
+- 无 store/adapter/IO 依赖——生产与 benchmark 共享同一逻辑
+- `ExtractionInput`（messages + context + metadata）——为 v0.4+ tool events 前向扩展
+
+**混合四层比较器**
+- 四层：Token Jaccard（15%）+ TF-IDF（35%）+ Bigram（15%）+ Embedding（35%）
+- embedding 不可用或失败时降级到三层（20%+50%+30%）
+- `TextComparisonResult` 含逐层评分，支持可解释性分析
+- `cosineSimilarity` 纯函数
+
+**缓存 + 重复 + 统计**
+- `FileBenchmarkCache`，SHA-256 缓存键含 pipeline + model + runtime + caseId + **repeatIndex**（关键——无 repeatIndex 时 repeat=3 命中同一缓存）
+- `RepeatController`，suite 级策略：extraction=3、recall=1、dedup=3、conflict=3、forgetting=1（50 个案例共 110 次调用）
+- `computeStats` 纯函数：mean、stddev、95% CI（正态近似）
+- `LLMTraceLogger`：JSONL trace，用于成本/延迟分析
+
+**配置 + 报告**
+- 独立 `benchmark.config.json`（不在 memory.config.json 中）——不同生命周期
+- `stripJsoncComments`：字符串感知状态机（保留字符串内的 URL）
+- `substituteEnvVars`：`$VAR_NAME` → `process.env[VAR_NAME]`
+- `BenchmarkReport` v0.3.2 schema 含 model、comparator、cost、weights 元数据
+
+**CLI 集成**
+- `--mode real` — 真实 LLM 提取基准测试
+- `--provider` — openai / qwen / ollama
+- `--model` — 模型名覆盖
+- `--repeat N` — 重复次数覆盖
+- `--no-cache` — 禁用缓存
+
+**自审查修复（8 个问题）**
+- OpenAI API：移除不支持的 `top_k` 参数
+- 配置：JSONC 注释剥离改为字符串感知（保留 URL）
+- 提取：`confidenceValues` + `VALID_CONFIDENCE` — 补充缺失的 `observed` 级别
+- Embedding provider：补充重试逻辑（OpenAI 和 Qwen 均缺失）
+- 提取：移除冗余 dynamic import
+- 配置：澄清 `as` + `??` 运算符优先级
+
+**测试增长：** 373 → 491 项（+118），55 个文件，0 回归
 
 ### v0.3.1 — 记忆质量回归与智能基准测试 (2026-07-15)
 
