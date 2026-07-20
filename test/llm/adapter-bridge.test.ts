@@ -3,7 +3,8 @@
  */
 
 import { describe, test, expect } from "vitest"
-import { AdapterLLMProvider, extractResponseText } from "../../src/llm/adapter-bridge.js"
+import { AdapterLLMProvider } from "../../src/llm/adapter-bridge.js"
+import { extractResponseText } from "../../src/extraction.js"
 import type { RuntimeAdapter } from "../../src/adapter.js"
 
 // Mock RuntimeAdapter

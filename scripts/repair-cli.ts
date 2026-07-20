@@ -15,7 +15,6 @@ import { FileCandidateQueue } from "../src/repair/queue.js"
 import { RepairService } from "../src/repair/service.js"
 import { AuditLog } from "../src/repair/audit.js"
 import { join } from "node:path"
-import { readFileSync } from "node:fs"
 
 interface RepairArgs {
   list: boolean
@@ -49,15 +48,6 @@ function parseArgs(argv: string[]): RepairArgs {
 }
 
 function getMemoryDir(): string {
-  // Try to read from memory.config.json, fall back to default
-  const configPath = join(process.cwd(), "memory.config.json")
-  try {
-    const config = JSON.parse(readFileSync(configPath, "utf-8"))
-    // Use default project memory dir
-  } catch {
-    // ignore
-  }
-  // Default: user home + .config/opencode/memory/projects/<sanitized>
   const home = process.env.USERPROFILE || process.env.HOME || ""
   return join(home, ".config", "opencode", "memory", "user")
 }

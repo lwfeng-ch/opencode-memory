@@ -563,7 +563,7 @@ export async function extractMemories(
  * - `{ message: { content: string } }`
  * - `{ choices: [{ message: { content: string } }] }` (legacy OpenAI)
  */
-function extractResponseText(response: unknown): string {
+export function extractResponseText(response: unknown): string {
   if (typeof response === "string") return response
   if (response === null || typeof response !== "object") return ""
   const obj = response as Record<string, unknown>
@@ -571,6 +571,12 @@ function extractResponseText(response: unknown): string {
   if (typeof obj.content === "string") return obj.content
   if (typeof obj.response === "string") return obj.response
   if (typeof obj.text === "string") return obj.text
+
+  // DashScope shape: { output: { text: string } }
+  if (obj.output && typeof obj.output === "object") {
+    const out = obj.output as Record<string, unknown>
+    if (typeof out.text === "string") return out.text
+  }
 
   // Handle SDK message shape: { info: AssistantMessage, parts: [{ type: "text", text: "..." }] }
   if (Array.isArray(obj.parts)) {

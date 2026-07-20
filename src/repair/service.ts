@@ -156,13 +156,13 @@ export class RepairService {
    */
   private setFrontmatterField(content: string, fields: Record<string, unknown>): string {
     // Split into frontmatter and body
-    const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+    const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
     if (!fmMatch) {
       // No frontmatter — create one
       const newFm = Object.entries(fields)
         .map(([k, v]) => `${k}: ${v === null ? "null" : typeof v === "string" ? v : JSON.stringify(v)}`)
         .join("\n")
-      return `---\n${newFm}\n---\n${content}`
+      return `---\r\n${newFm}\r\n---\r\n${content}`
     }
 
     let fm = fmMatch[1]
@@ -178,6 +178,6 @@ export class RepairService {
       }
     }
 
-    return `---\n${fm}\n---\n${body}`
+    return `---\r\n${fm}\r\n---\r\n${body}`
   }
 }

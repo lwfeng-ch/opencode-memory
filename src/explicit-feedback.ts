@@ -59,9 +59,7 @@ const ACTION_VERBS = [
 const DESCRIPTIVE_PATTERNS = [
   /用户(?:说|提到|反馈|表示|认为|喜欢|偏好|擅长)/i,
   /the\s+user\s+(?:mentioned|said|stated|reported|indicated|likes|prefers|is)/i,
-  /用户(?:说|提到|反馈|表示|认为|喜欢|偏好|擅长)/i,
   /i\s+received\s+feedback/i,
-  /用户反馈/i,
 ]
 
 function hasActionIntent(text: string): boolean {

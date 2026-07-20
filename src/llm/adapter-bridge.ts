@@ -13,43 +13,7 @@
 
 import type { CompletionProvider, CompletionRequest, CompletionResult } from "./provider.js"
 import type { RuntimeAdapter } from "../adapter.js"
-
-/**
- * Extract text from various LLM response shapes.
- * Handles: plain string, { content }, { message: { content } }, { choices: [{ message: { content } }] }
- */
-export function extractResponseText(response: unknown): string {
-  if (typeof response === "string") return response
-  if (response === null || typeof response !== "object") return ""
-  const obj = response as Record<string, unknown>
-
-  // { content: string }
-  if (typeof obj.content === "string") return obj.content
-
-  // { message: { content: string } }
-  if (obj.message && typeof obj.message === "object") {
-    const msg = obj.message as Record<string, unknown>
-    if (typeof msg.content === "string") return msg.content
-  }
-
-  // { choices: [{ message: { content: string } }] } (OpenAI legacy)
-  if (Array.isArray(obj.choices) && obj.choices.length > 0) {
-    const choice = obj.choices[0] as Record<string, unknown>
-    if (choice?.message && typeof choice.message === "object") {
-      const msg = choice.message as Record<string, unknown>
-      if (typeof msg.content === "string") return msg.content
-    }
-    if (typeof choice.text === "string") return choice.text
-  }
-
-  // { output: { text: string } } (DashScope)
-  if (obj.output && typeof obj.output === "object") {
-    const out = obj.output as Record<string, unknown>
-    if (typeof out.text === "string") return out.text
-  }
-
-  return typeof obj.text === "string" ? obj.text : ""
-}
+import { extractResponseText } from "../extraction.js"
 
 /**
  * Wraps RuntimeAdapter as a CompletionProvider.
