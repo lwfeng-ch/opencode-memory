@@ -3,21 +3,34 @@
  * opencode-memory — Repair CLI (v0.3.3)
  *
  * Usage:
- *   bun run repair                      — interactive review
- *   bun run repair --list               — list candidates (non-interactive)
- *   bun run repair --approve cand_001   — approve specific candidate
- *   bun run repair --approve-all-low    — approve all low-risk archive candidates
- *   bun run repair --restore file.md    — restore archived file
- *   bun run repair --clear              — clear executed/rejected candidates from queue
+ *   bun run repair                              — interactive review
+ *   bun run repair --scan [--scope project]     — scan & enqueue candidates (run before --list)
+ *   bun run repair --list                       — list pending candidates (non-interactive)
+ *   bun run repair --approve cand_001           — approve specific candidate
+ *   bun run repair --approve-all-low            — approve all low-risk candidates
+ *   bun run repair --restore file.md            — restore archived file
+ *   bun run repair --clear                      — clear executed/rejected candidates from queue
+ *
+ * Scope:
+ *   --scope project (default) | user | all     — which memory scope to operate on
+ *
+ * Session scanning:
+ *   --include-recent-sessions                  — override 30-day threshold (scan ALL session_*.md)
  */
 
 import { FileCandidateQueue } from "../src/repair/queue.js"
 import { RepairService } from "../src/repair/service.js"
 import { AuditLog } from "../src/repair/audit.js"
+import { MemoryMigrationScanner, LegacyScanner, SessionScanner } from "../src/migration/scanner.js"
 import { join } from "node:path"
+
+type Scope = "project" | "user" | "all"
 
 interface RepairArgs {
   list: boolean
+  scan: boolean
+  scope: Scope
+  includeRecentSessions: boolean
   approve?: string
   approveAllLow: boolean
   restore?: string
@@ -27,6 +40,9 @@ interface RepairArgs {
 function parseArgs(argv: string[]): RepairArgs {
   const result: RepairArgs = {
     list: false,
+    scan: false,
+    scope: "project",
+    includeRecentSessions: false,
     approveAllLow: false,
     clear: false,
   }
@@ -34,6 +50,18 @@ function parseArgs(argv: string[]): RepairArgs {
     const arg = argv[i]
     if (arg === "--list") {
       result.list = true
+    } else if (arg === "--scan") {
+      result.scan = true
+    } else if (arg === "--include-recent-sessions") {
+      result.includeRecentSessions = true
+    } else if (arg === "--scope" && i + 1 < argv.length) {
+      const v = argv[++i] as Scope
+      if (v === "project" || v === "user" || v === "all") {
+        result.scope = v
+      } else {
+        console.error(`Invalid --scope value: ${v} (expected: project|user|all)`)
+        process.exit(1)
+      }
     } else if (arg === "--approve" && i + 1 < argv.length) {
       result.approve = argv[++i]
     } else if (arg === "--approve-all-low") {
@@ -47,9 +75,21 @@ function parseArgs(argv: string[]): RepairArgs {
   return result
 }
 
-function getMemoryDir(): string {
+function getProjectDir(): string {
+  const home = process.env.USERPROFILE || process.env.HOME || ""
+  // Sanitized name mirrors paths.ts logic for the current plugin's project root
+  return join(home, ".config", "opencode", "memory", "projects", "D--opencode-.config-opencode-plugins-opencode-memory")
+}
+
+function getUserDir(): string {
   const home = process.env.USERPROFILE || process.env.HOME || ""
   return join(home, ".config", "opencode", "memory", "user")
+}
+
+function getMemoryDirs(scope: Scope): string[] {
+  if (scope === "all") return [getProjectDir(), getUserDir()]
+  if (scope === "user") return [getUserDir()]
+  return [getProjectDir()]
 }
 
 function getQueueDir(): string {
@@ -80,20 +120,75 @@ function displayCandidate(c: any, index: number): void {
   console.log("")
 }
 
+async function scanAndEnqueue(
+  dir: string,
+  scope: "project" | "user",
+  queue: FileCandidateQueue,
+  options: { includeRecentSessions: boolean },
+): Promise<number> {
+  const sessionThreshold = options.includeRecentSessions ? 0 : 30
+  const scanner = new MemoryMigrationScanner(
+    new LegacyScanner(dir),
+    new SessionScanner(dir, sessionThreshold),
+  )
+  const candidates = await scanner.scanAll()
+  for (const c of candidates) {
+    c.scope = scope
+    await queue.add(c)
+  }
+  return candidates.length
+}
+
+async function executeCandidateWithScope(
+  candidate: RepairCandidate,
+  scopeToService: Map<string, RepairService>,
+  queue: FileCandidateQueue,
+): Promise<void> {
+  const service = scopeToService.get(candidate.scope || "project")
+  if (!service) {
+    throw new Error(`No service for scope: ${candidate.scope || "project"}`)
+  }
+  await queue.updateStatus(candidate.id, "approved")
+  await service.executeCandidate(candidate)
+  await queue.updateStatus(candidate.id, "executed")
+}
+
+import type { RepairCandidate } from "../src/repair/candidate.js"
+
 async function main() {
   const args = parseArgs(process.argv)
-  const memoryDir = getMemoryDir()
   const queueDir = getQueueDir()
   const auditFile = getAuditFile()
 
   const queue = new FileCandidateQueue(queueDir)
   const auditLog = new AuditLog(auditFile)
-  const repair = new RepairService(memoryDir, auditLog)
+
+  // Build scope → service map (single shared audit log)
+  const projectDir = getProjectDir()
+  const userDir = getUserDir()
+  const scopeToService = new Map<string, RepairService>()
+  scopeToService.set("project", new RepairService(projectDir, auditLog))
+  scopeToService.set("user", new RepairService(userDir, auditLog))
+
+  // --scan: scan and enqueue candidates from all configured scopes
+  if (args.scan) {
+    let total = 0
+    for (const dir of getMemoryDirs(args.scope)) {
+      const scope = dir === userDir ? "user" : "project"
+      const n = await scanAndEnqueue(dir, scope, queue, {
+        includeRecentSessions: args.includeRecentSessions,
+      })
+      console.log(`Scanned ${scope} scope: ${n} candidates enqueued`)
+      total += n
+    }
+    console.log(`\nTotal: ${total} candidates enqueued. Run \`bun run repair --list\` to review.`)
+    return
+  }
 
   if (args.list) {
     const candidates = await queue.getPending()
     if (candidates.length === 0) {
-      console.log("No pending candidates.")
+      console.log("No pending candidates. Run `bun run repair --scan` to scan first.")
       return
     }
     console.log(`Found ${candidates.length} candidates (${candidates.length} pending)\n`)
@@ -107,29 +202,23 @@ async function main() {
       console.error(`Candidate not found: ${args.approve}`)
       process.exit(1)
     }
-    await queue.updateStatus(args.approve, "approved")
-    await repair.executeCandidate(candidate)
-    await queue.updateStatus(args.approve, "executed")
-    console.log(`Executed: ${candidate.action} ${candidate.source}`)
+    await executeCandidateWithScope(candidate, scopeToService, queue)
+    console.log(`Executed: ${candidate.action} ${candidate.source} (${candidate.scope || "project"})`)
     return
   }
 
   if (args.approveAllLow) {
     const pending = await queue.getPending()
-    const lowRiskArchive = pending.filter(
-      (c) => c.risk === "low" && c.action === "archive",
-    )
-    if (lowRiskArchive.length === 0) {
-      console.log("No low-risk archive candidates to approve.")
+    const lowRisk = pending.filter((c) => c.risk === "low")
+    if (lowRisk.length === 0) {
+      console.log("No low-risk candidates to approve.")
       return
     }
-    console.log(`Approving ${lowRiskArchive.length} low-risk archive candidates...`)
-    for (const c of lowRiskArchive) {
+    console.log(`Approving ${lowRisk.length} low-risk candidates...`)
+    for (const c of lowRisk) {
       try {
-        await queue.updateStatus(c.id, "approved")
-        await repair.executeCandidate(c)
-        await queue.updateStatus(c.id, "executed")
-        console.log(`  ✓ ${c.action} ${c.source}`)
+        await executeCandidateWithScope(c, scopeToService, queue)
+        console.log(`  ✓ ${c.action} ${c.source} (${c.scope || "project"})`)
       } catch (err) {
         console.log(`  ✗ ${c.source}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -138,8 +227,19 @@ async function main() {
   }
 
   if (args.restore) {
-    await repair.restore(args.restore)
-    console.log(`Restored: ${args.restore}`)
+    // Try both scopes — first project, then user
+    for (const [scope, service] of scopeToService) {
+      try {
+        await service.restore(args.restore)
+        console.log(`Restored: ${args.restore} (${scope})`)
+        return
+      } catch (err) {
+        // try next scope
+        if (scope === "user") {
+          throw err
+        }
+      }
+    }
     return
   }
 
@@ -152,7 +252,7 @@ async function main() {
   // Default: interactive mode
   const candidates = await queue.getPending()
   if (candidates.length === 0) {
-    console.log("No pending candidates. Run `bun run audit` or scanner to generate candidates.")
+    console.log("No pending candidates. Run `bun run repair --scan` to scan first.")
     return
   }
 
@@ -177,9 +277,7 @@ async function main() {
 
     if (answer === "y") {
       try {
-        await queue.updateStatus(c.id, "approved")
-        await repair.executeCandidate(c)
-        await queue.updateStatus(c.id, "executed")
+        await executeCandidateWithScope(c, scopeToService, queue)
         console.log(`  ✓ ${c.action} executed\n`)
         approved++
       } catch (err) {
@@ -201,7 +299,7 @@ async function main() {
   console.log(`\nSummary: ${approved} approved, ${rejected} rejected, ${skipped} skipped`)
 
   // Show audit log summary
-  const log = await repair.getAuditLog()
+  const log = await auditLog.getAll()
   if (log.length > 0) {
     console.log(`\nAudit Log (${log.length} entries):`)
     const recent = log.slice(-5)

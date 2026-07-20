@@ -125,7 +125,8 @@ benchmark/                Project-root test harness (not in src/, not packaged)
 scripts/                  CLI entry points (v0.3+)
 ├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
 ├── benchmark-cli.ts      bun run benchmark [--mode mock|golden|real] [--provider X] [--model Y] [--repeat N] [--no-cache] (v0.3.2)
-└── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
+├── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
+└── repair-cli.ts         bun run repair [--scan] [--scope project|user|all] [--list] [--approve-all-low] [--restore X] (v0.3.3)
 ```
 
 ### Memory Pipeline
@@ -340,9 +341,19 @@ bun run benchmark --mode real --no-cache     # real LLM without cache (v0.3.2)
 bun run quality                              # scan project memory, console output
 bun run quality --json                        # JSON to stdout
 bun run quality --scope all                   # scan both user + project scopes
+
+# Repair CLI — memory cleanup (v0.3.3)
+bun run repair --scan --include-recent-sessions   # scan project scope, include all session_*.md
+bun run repair --scan --scope all                  # scan both project + user scopes
+bun run repair --list                               # list pending candidates
+bun run repair --approve-all-low                    # approve all low-risk candidates (archive/delete)
+bun run repair --restore session_2026-07-01-x.md    # restore archived file to active
+bun run repair --clear                              # clear executed/rejected from queue
 ```
 
 491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
+
+> **Note:** As of v0.3.3, the test suite has grown to **589 tests across 63 files** (587 pass + 2 pre-existing C2/C3 SDK timeouts that require a live OpenCode instance). See Changelog below for per-version details.
 
 ## Design Principles
 
@@ -428,6 +439,42 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.3.3 — Memory Repair Foundation (2026-07-20)
+
+**Repair Foundation**
+- `RepairService` — `archive()` / `delete()` / `restore()` operating on frontmatter metadata (archive = `status: archived` field, NOT file move)
+- `FileCandidateQueue` — file-based JSON queue for repair candidates (add/get/getPending/updateStatus/clearExecuted)
+- `AuditLog` — JSONL append-only log of all repair actions with query by type/filename
+- `RepairCandidate` — typed candidate with risk assessment (low/medium/high) and `scope` field for multi-scope routing
+- `MemoryMigrationScanner` — `LegacyScanner` (legacy/v1/) + `SessionScanner` (session_*.md, configurable threshold)
+- `bun run repair` CLI — `--scan` / `--list` / `--approve` / `--approve-all-low` / `--restore` / `--clear` / `--scope project|user|all` / `--include-recent-sessions`
+
+**Lifecycle Metadata**
+- `MemoryStatus` (`active` | `archived`) — frontmatter field, defaults to active
+- `LifecycleMetadata` interface — status + lastRecalledAt + recallCount + archivedAt
+- `parseLifecycle()` — reads lifecycle fields from frontmatter with safe defaults
+- `lifecycleScoreMultiplier()` — archived memories get 0.1x score (10x deprioritized but still searchable as last resort)
+
+**explicit-feedback Tightening**
+- Three-condition detection: signal ("记住"/"always use") + action intent (verb) + user authority — descriptive observations no longer trigger auto-save
+- 6 positive + 12 negative test cases covering edge cases like "用户喜欢" / "the user prefers"
+
+**Adapter Bridge**
+- `AdapterLLMProvider` wraps RuntimeAdapter as `CompletionProvider` — enables benchmark to use OpenCode's adapter without exposing store/SDK
+- `extractResponseText()` — exported from extraction.ts, handles 6+ response shapes (plain string, {content}, {message.content}, OpenAI {choices}, DashScope {output.text}, {text})
+
+**Critical Bug Fixes (post-merge)**
+- **P0:** `package.json` was zeroed out by commit `0adb23a` — restored all scripts + added `repair`
+- **P0:** `repair-cli.ts` hardcoded `user` scope but 21 polluting memories were in `project` scope — added `--scope project|user|all` (default project)
+- **P1:** `repair-cli.ts` missing `--scan` command — scanner couldn't enqueue candidates, `--list` always empty
+- **P1:** `SessionScanner` 30-day threshold skipped all recent July session_*.md — added `--include-recent-sessions` flag (threshold=0)
+
+**Real Cleanup Executed**
+- 21 candidates cleared: 13 legacy/v1/ files deleted (low risk, v2 versions exist at top level) + 8 session_*.md files archived (status field set, files retained)
+- MEMORY.md rebuilt: 32 → 28 entries (4 stale legacy index entries removed)
+
+**Test growth:** 491 → 589 tests (+98), 63 files, 0 regressions (2 pre-existing C2/C3 SDK timeouts require live OpenCode instance)
 
 ### v0.3.2 — Memory Benchmark Reality Layer (2026-07-16)
 

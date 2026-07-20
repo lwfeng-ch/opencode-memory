@@ -1,0 +1,30 @@
+{
+  "name": "opencode-memory",
+  "version": "0.1.0",
+  "description": "Pipeline-centered, model-agnostic long-term memory system for OpenCode — KAIROS mode, two-stage recall, dream consolidation.",
+  "type": "module",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.14.48",
+    "zod": "^4.0.0"
+  },
+  "scripts": {
+    "test": "bun test test/",
+    "audit": "bun run scripts/audit-cli.ts",
+    "benchmark": "bun run scripts/benchmark-cli.ts",
+    "benchmark:mock": "bun run scripts/benchmark-cli.ts",
+    "benchmark:adversarial": "BENCHMARK_MODE=adversarial bun run scripts/benchmark-cli.ts",
+    "benchmark:golden": "bun run scripts/benchmark-cli.ts --mode golden",
+    "quality": "bun run scripts/quality-cli.ts",
+    "repair": "bun run scripts/repair-cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "bun-types": "latest",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  }
+}

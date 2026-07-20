@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.3.2 | **Last Updated**: 2026-07-16 | **Tests**: 490 pass / 55 files (1 flaky golden-extra duration pre-existing)
+> **Version**: 0.3.3 | **Last Updated**: 2026-07-20 | **Tests**: 587 pass / 63 files (2 pre-existing C2/C3 SDK timeouts require live OpenCode instance)
 
 ## Table of Contents
 
@@ -308,6 +308,20 @@ opencode-memory/
 │   │       ├── conflict.ts    Version/tech-switch conflict detection
 │   │       ├── quality.ts     Frontmatter completeness + content checks
 │   │       └── staleness.ts   180-day prune rule, explicit never stale
+│   ├── llm/              LLM provider abstraction (v0.3.2+)
+│   │   ├── provider.ts       CompletionProvider + EmbeddingProvider + ModelProvider interfaces
+│   │   ├── openai.ts        OpenAI completion + embedding (fetch-based, retry)
+│   │   ├── qwen.ts          Qwen/DashScope completion + BGE-M3 embedding
+│   │   └── adapter-bridge.ts  AdapterLLMProvider wraps RuntimeAdapter (v0.3.3)
+│   ├── repair/            Memory repair foundation (v0.3.3)
+│   │   ├── candidate.ts     RepairCandidate types + generateId + assessRisk + scope field
+│   │   ├── queue.ts         FileCandidateQueue (file-based JSON queue)
+│   │   ├── service.ts       RepairService (archive/delete/restore + frontmatter metadata)
+│   │   └── audit.ts         AuditLog (JSONL append + query)
+│   ├── migration/         Cross-version migration (v0.3.3+)
+│   │   └── scanner.ts        LegacyScanner + SessionScanner + MemoryMigrationScanner
+│   ├── lifecycle/         Memory lifecycle metadata (v0.3.3)
+│   │   └── types.ts          MemoryStatus + LifecycleMetadata + parseLifecycle + lifecycleScoreMultiplier
 │   ├── message-cache.ts  Append-only JSONL message cache
 │   ├── explicit-feedback.ts  Explicit signal detection ("记住"/"always use")
 │   ├── candidate.ts      Typed memory candidates, confidence routing
@@ -336,8 +350,10 @@ opencode-memory/
 │   └── data/             11 benchmark cases (5 suites)
 ├── scripts/              CLI entry points (v0.3+)
 │   ├── audit-cli.ts      bun run audit
-│   └── benchmark-cli.ts  bun run benchmark
-├── test/                 34 test files (258 tests)
+│   ├── benchmark-cli.ts  bun run benchmark
+│   ├── quality-cli.ts    bun run quality (v0.3.1)
+│   └── repair-cli.ts    bun run repair (v0.3.3 — scan/list/approve/restore/clear + --scope + --include-recent-sessions)
+├── test/                 63 test files (589 tests; 587 pass + 2 pre-existing C2/C3 SDK timeouts)
 ├── memory.config.example.json   Configuration template
 ├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config

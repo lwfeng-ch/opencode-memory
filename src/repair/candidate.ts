@@ -29,6 +29,12 @@ export interface RepairCandidate {
   risk: CandidateRisk
   status: CandidateStatus
   createdAt: number
+  /**
+   * Which memory scope this candidate originated from (filled by the caller
+   * that wraps the scanner, e.g. repair-cli sets "project" or "user").
+   * Optional for backward compatibility with single-scope callers.
+   */
+  scope?: "project" | "user"
 }
 
 export type RepairActionType = "archive" | "delete" | "restore"

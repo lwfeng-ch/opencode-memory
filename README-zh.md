@@ -411,6 +411,42 @@ MIT
 
 ## 更新日志
 
+### v0.3.3 — 记忆修复基础设施 (2026-07-20)
+
+**修复基础设施**
+- `RepairService` — `archive()` / `delete()` / `restore()` 操作 frontmatter metadata（archive = 设置 `status: archived` 字段，**不移动文件**）
+- `FileCandidateQueue` — 基于文件的 JSON 候选队列（add/get/getPending/updateStatus/clearExecuted）
+- `AuditLog` — JSONL 追加日志，记录所有修复动作，可按 type/filename 查询
+- `RepairCandidate` — 类型化候选，含风险评估（low/medium/high）+ `scope` 字段支持多 scope 路由
+- `MemoryMigrationScanner` — `LegacyScanner`（legacy/v1/）+ `SessionScanner`（session_*.md，可配置阈值）
+- `bun run repair` CLI — `--scan` / `--list` / `--approve` / `--approve-all-low` / `--restore` / `--clear` / `--scope project|user|all` / `--include-recent-sessions`
+
+**生命周期元数据**
+- `MemoryStatus`（`active` | `archived`）—— frontmatter 字段，默认 active
+- `LifecycleMetadata` 接口 —— status + lastRecalledAt + recallCount + archivedAt
+- `parseLifecycle()` —— 从 frontmatter 安全读取生命周期字段
+- `lifecycleScoreMultiplier()` —— archived 记忆得分乘 0.1（10 倍降权但仍可搜索作为最后回退）
+
+**explicit-feedback 收紧**
+- 三条件检测：信号（"记住"/"always use"）+ 动作意图（动词）+ 用户权限 —— 描述性观察不再触发自动保存
+- 6 个正例 + 12 个反例测试，覆盖"用户喜欢" / "the user prefers" 等边界
+
+**适配器桥接**
+- `AdapterLLMProvider` 包装 RuntimeAdapter 为 `CompletionProvider` —— 让 benchmark 可用 OpenCode 适配器而不暴露 store/SDK
+- `extractResponseText()` —— 从 extraction.ts 导出，处理 6+ 种响应形状（plain string、{content}、{message.content}、OpenAI {choices}、DashScope {output.text}、{text}）
+
+**关键 Bug 修复（合并后）**
+- **P0:** `package.json` 被 commit `0adb23a` 清空为 0 字节 —— 恢复所有 scripts + 新增 `repair`
+- **P0:** `repair-cli.ts` 硬编码 `user` scope，但 21 个污染候选全在 `project` scope —— 增加 `--scope project|user|all`（默认 project）
+- **P1:** `repair-cli.ts` 缺少 `--scan` 命令 —— scanner 无法入队，`--list` 永远空
+- **P1:** `SessionScanner` 30 天阈值跳过所有 7 月 session_*.md —— 增加 `--include-recent-sessions` flag（阈值=0）
+
+**实际清理执行**
+- 清理 21 个候选：13 个 legacy/v1/ 文件 delete（low risk，顶层已有 v2 版本）+ 8 个 session_*.md 文件 archive（设 status 字段，文件保留）
+- MEMORY.md 重建：32 → 28 条目（移除 4 个过期 legacy 索引）
+
+**测试增长：** 491 → 589（+98），63 个文件，0 回归（2 个 pre-existing C2/C3 SDK 超时需活跃 OpenCode 实例）
+
 ### v0.3.2 — 记忆基准测试真实化层 (2026-07-16)
 
 **LLM Provider 抽象**
