@@ -103,7 +103,12 @@ src/
 ├── log.ts                File logger (avoids stdout pollution, Windows CJK safe)
 ├── lock.ts               File-based mutual exclusion (PID + stale timeout)
 ├── tools.ts              6 custom tool definitions for the main agent
-└── fingerprint.ts        Re-export shim → evaluation/fingerprint.ts (deprecated, use new path)
+├── fingerprint.ts        Re-export shim → evaluation/fingerprint.ts (deprecated, use new path)
+├── lifecycle/            Lifecycle metadata (v0.3.3+)
+│   ├── types.ts          MemoryStatus (active|archived), LifecycleMetadata, parseLifecycle, lifecycleScoreMultiplier
+│   └── archive-types.ts  ArchiveEntry, buildArchiveLine, parseArchiveLine, MANIFEST_AUTO_GENERATED_HEADER (v0.3.4)
+└── index/                Manifest index managers (v0.3.4)
+    └── archive-index.ts  ArchiveIndexManager — readArchive/writeArchive/addEntry/removeEntry for ARCHIVE.md
 
 benchmark/                Project-root test harness (not in src/, not packaged)
 ├── runner.ts             BenchmarkRunner — orchestrates case execution via executor (v0.3.2: BenchmarkResult + stats fields)
@@ -126,7 +131,8 @@ scripts/                  CLI entry points (v0.3+)
 ├── audit-cli.ts          bun run audit [--json] [--scope user|project] [--format markdown]
 ├── benchmark-cli.ts      bun run benchmark [--mode mock|golden|real] [--provider X] [--model Y] [--repeat N] [--no-cache] (v0.3.2)
 ├── quality-cli.ts        bun run quality [--json] [--scope user|project|all] (v0.3.1)
-└── repair-cli.ts         bun run repair [--scan] [--scope project|user|all] [--list] [--approve-all-low] [--restore X] (v0.3.3)
+├── repair-cli.ts         bun run repair [--scan] [--scope project|user|all] [--list] [--approve-all-low] [--restore X] (v0.3.3)
+└── migrate-archive-index.ts  bun run scripts/migrate-archive-index.ts --dry-run|--apply [--scope=project|user|all] [--force] (v0.3.4)
 ```
 
 ### Memory Pipeline
@@ -349,11 +355,15 @@ bun run repair --list                               # list pending candidates
 bun run repair --approve-all-low                    # approve all low-risk candidates (archive/delete)
 bun run repair --restore session_2026-07-01-x.md    # restore archived file to active
 bun run repair --clear                              # clear executed/rejected from queue
+
+# Migration CLI — archive index migration (v0.3.4)
+bun run scripts/migrate-archive-index.ts --dry-run --scope=project  # preview migration
+bun run scripts/migrate-archive-index.ts --apply --scope=project    # execute migration
 ```
 
 491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
 
-> **Note:** As of v0.3.3, the test suite has grown to **589 tests across 63 files** (587 pass + 2 pre-existing C2/C3 SDK timeouts that require a live OpenCode instance). See Changelog below for per-version details.
+> **Note:** As of v0.3.4, the test suite has grown to **669 tests across 67 files** (668 pass + 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
 
 ## Design Principles
 

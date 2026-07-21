@@ -1,6 +1,6 @@
 ---
 name: "Session: Dream Consolidation Gather Phase"
-description: "Two rounds of memory ORIENT/GATHER before consolidation execution"
+description: "Five rounds of memory ORIENT/GATHER — gather phase fully saturated"
 type: project
 scope: project
 confidence: inferred
@@ -9,11 +9,15 @@ schema_version: 1
 
 # Dream Consolidation Gather Phase — Memory Inventory Analysis
 
-Two rounds of ORIENT + GATHER for dream consolidation. Round 1 (ses_09ca04a07ffe..., 2026-07-17T07:04) analyzed ~46 files across root/legacy/semantic dirs. Round 2 (ses_091124ce6ffe..., 2026-07-17T07:14) drilled into the legacy/v1/ mirror and produced detailed per-file drift assessments. Combined findings below.
+Five rounds of ORIENT + GATHER for dream consolidation. Round 1 (ses_09ca04a07ffe..., 2026-07-17T07:04) analyzed ~46 files across root/legacy/semantic dirs. Round 2 (ses_091124ce6ffe..., 2026-07-17T07:14) drilled into the legacy/v1/ mirror and produced detailed per-file drift assessments. Round 3 (ses_090fbfd86ffe..., 2026-07-17T07:39) added git-commit-level cross-referencing, identified a post-purge extraction pipeline survivor, and corrected the "5 N-issue fixes uncommitted" false claim across 4 session notes. Round 4 (ses_090e6d6c6ffe, 2026-07-17T08:02) repeated the same ORIENT/GATHER protocol against the current 23-file inventory via user-provided file list (no re-reading needed), confirming all prior drift candidates remain valid and that the gather phase has converged — no new drift categories emerged. Round 5 (ses_090cebd4dffewhY0bWPuHh1OCM, 2026-07-17T08:28) was triggered by a user prompt asking to "prepare dream consolidation context" with the current file inventory. Performed 26 parallel reads of all memory files, cross-referenced against user-scope `github_doc_update_rule.md`, and produced a consolidated JSON confirming the same 5 drift categories with no new findings — re-confirming convergence at the execution gap.
 
 # Current State
 
-All files have been read and catalogued. The `legacy/v1/` directory is confirmed as a dead mirror — all 13 files are duplicates, 3 are corrupted with system-prompt garbage, and several lag behind root-level updates. Highest-value next actions: delete the 3 corrupted legacy files, strip `legacy/v1/` (13 files) as a bulk operation, trim the self-referential `session_2026-07-17-dream-consolidation-gather.md` worklog, and update `v0_3_daily_usage.md` for v0.3.1+ commands.
+All files have been read and catalogued across 5 rounds. The `legacy/v1/` directory is confirmed as a dead mirror — all 13 files are duplicates, 3 are corrupted with system-prompt garbage, and several lag behind root-level updates. Round 3 added git-commit verification: confirmed all 5 N-issue fixes were committed in `03ecc72`, correcting false "uncommitted" claims in 4 session notes. Identified a new extraction pipeline artifact (`semantic/sessions/session_ses_09ca04a07ffe...`) that survived Round 3's purge (created AFTER the purge at 2026-07-17T07:00:52).
+
+Round 4 confirmed convergence: the 23-file inventory produced the same drift categories (corrupted, stale duplicate, outdated body, redundant, purge survivor) with no new classifications. Round 5 (08:28) re-confirmed — 26 parallel reads, consolidated JSON identical to Round 4's category set — no new drift categories, no new findings. The gather phase has definitively reached diminishing returns. The execution gap is now the sole bottleneck — no further ORIENT rounds warranted until recommended actions are taken.
+
+Highest-value next actions: delete the 3 corrupted legacy files, strip `legacy/v1/` (13 files) as a bulk operation, delete the surviving extraction pipeline artifact, correct stale commit-claims in 4 root-level session notes, and update `v0_3_daily_usage.md` for v0.3.1+ commands.
 
 # Task Specification
 
@@ -72,6 +76,47 @@ Key finding: **legacy/v1/ is a dead mirror** — 13 files duplicated from root, 
 | `legacy/v1/session_2026-07-13-automation-verification.md` | Stale duplicate — root-level has "addressed in Rounds 2-10" note that legacy copy lacks. |
 | `legacy/v1/session_2026-07-10-agent-field-fix.md` | Stale duplicate — no update difference but unnecessary second copy. |
 
+## Round 4 — Converged ORIENT/GATHER (ses_090e6d6c6ffe, 2026-07-17T08:02)
+
+Repeated the same ORIENT/GATHER protocol against the current 23-file inventory. User provided the file list directly — no `memory_read` calls needed. Produced comprehensive JSON with 23 drift candidates and 23 per-file gather facts.
+
+## Round 5 — Re-convergence Verification (ses_090cebd4dffewhY0bWPuHh1OCM, 2026-07-17T08:28)
+
+User prompted "prepare dream consolidation context" with current file inventory. Performed 26 parallel `memory_read` calls (every memory file body), cross-referenced user-scope `github_doc_update_rule.md`. Produced consolidated JSON with 11 drift candidates and 11 per-file gather facts.
+
+### Summary of 11 drift candidates
+
+| Category | Count | Files |
+|----------|-------|-------|
+| Corrupted — delete | 3 | Same 3 `legacy/v1/feedback_*` files |
+| Stale duplicate — delete | 1 | `legacy/v1/` (10 remaining stale duplicates, bulk group) |
+| Outdated body — needs update | 4 | `session_2026-07-13-automation-verification.md`, `session_2026-07-14-consolidation-gather.md`, `session_2026-07-14-extraction-validator.md`, `session_2026-07-14-rounds2-9-complete.md` |
+| Stale/unaddressed claim | 1 | `v0_3_daily_usage.md` — missing v0.3.1+ commands |
+| Redundant/low-value — consider delete | 4 | `local_changelog_maintenance.md`, `memory_optimization_design.md`, `session_2026-07-17-consolidation-gather-empty.md`, current file itself |
+| Purge survivor — evaluate | 1 | `semantic/sessions/session_ses_09ca04a07ffeq3TxKQuY0lbUXp.md` |
+
+### Key confirmation signals
+- **Zero new drift categories** — same 5 buckets as Round 3/4
+- **Git `03ecc72` refutation** re-confirmed across all 4 session notes with false uncommitted claims
+- **No new findings** — Round 5 produced zero novel insights beyond what Round 3 and 4 already identified
+- **Definitive convergence**: gather phase is complete; any further ORIENT round will reproduce identical findings with diminishing marginal utility
+
+### Summary of 23 drift candidates (consolidated across all rounds)
+
+| Category | Count | Files |
+|----------|-------|-------|
+| Corrupted — delete | 3 | `legacy/v1/feedback_1784194665635.md`, `legacy/v1/feedback_1784194665692.md`, `legacy/v1/feedback_1784194665802.md` |
+| Stale duplicate — delete | 10 | All remaining `legacy/v1/*` files (extraction_priority_feedback, memory_optimization_design, local_changelog_maintenance, qwen_code_analysis, 6 session worklogs) |
+| Outdated body — needs update | 5 | `session_2026-07-13-automation-verification.md` (181 lines misleading), `session_2026-07-14-consolidation-gather.md` (stale uncommitted claim), `session_2026-07-14-extraction-validator.md` (stale uncommitted claim), `session_2026-07-14-rounds2-9-complete.md` (stale footnote), `v0_3_daily_usage.md` (missing v0.3.1+ commands) |
+| Redundant/low-value — consider delete | 4 | `local_changelog_maintenance.md`, `memory_optimization_design.md`, `session_2026-07-17-consolidation-gather-empty.md`, this file itself |
+| Purge survivor — evaluate | 1 | `semantic/sessions/session_ses_09ca04a07ffeq3TxKQuY0lbUXp.md` |
+
+### Key convergence signals
+- **No new drift categories** vs Round 3 (same 5 buckets)
+- **The "uncommitted" false-claim pattern** now spans 4 files, all refuted by git `03ecc72`
+- **Gather phase has converged**: further ORIENT rounds will find diminishing returns
+- **Bottleneck shifted from discovery to execution**: the analysis is complete; all recommended actions from Rounds 1-3 remain unexecuted
+
 # Workflow
 
 1. Read all memory files in parallel (18 reads in Round 2)
@@ -110,15 +155,24 @@ Key finding: **legacy/v1/ is a dead mirror** — 13 files duplicated from root, 
 
 # Learnings
 
-- 46 files in the memory store, ~30 have duplication issues
+- 46 files originally in the memory store, ~30 had duplication issues — converged to 23 in Round 4 inventory
 - `legacy/v1/` was bulk-copied at 2026-07-17T00:51:59 — this was a legacy migration; all 13 files are dead mirrors
 - `semantic/memories/` was also bulk-copied at the same timestamp — another mirror
 - Round 2 confirmed legacy/v1/ is uniquely stale: 3 corrupted, 10 all lag behind root-level updates
 - `extraction_priority_feedback.md` is the single source of truth for v2 phase structure
 - Pattern to avoid: writing session notes that get treated as memory → they become drift candidates in the next consolidation pass
+- Round 3 added git-level verification: committed `03ecc72` fixes the "5 uncommitted" false claim in 4 files
+- Round 3 confirmed extraction pipeline artifact `semantic/sessions/session_ses_09ca04a07ffe...` survived Round 3 purge (created AFTER purge at 2026-07-17T07:00:52) — same deletion criteria applies
+- The working-tree vs committed discrepancy is a repeating error mode: 4 separate session notes all claimed "N-issue fixes uncommitted" after they were committed
+- **Round 4 convergence**: gather phase has reached diminishing returns — no new drift categories emerged vs Round 3. Bottleneck is now execution, not discovery.
+- **Round 5 re-convergence verification**: 26 parallel reads produced identical drift categories to Round 4. Zero new findings. Re-confirms definitive convergence.
+- **4 files with stale commit claims**: `session_2026-07-14-consolidation-gather.md`, `session_2026-07-14-extraction-validator.md`, `session_2026-07-14-rounds2-9-complete.md`, `legacy/v1/extraction_priority_feedback.md` — all claim "fixes uncommitted" but git `03ecc72` shows all committed
 - ✅ Done (Round 1): corrupted files pruned, duplicate pairs deduplicated, Key Design Decisions merged
 - ✅ Done (Round 2): full drift assessment of all 18 non-trivial memory files; legacy/v1/ contamination quantified
-- ⏳ Pending: bulk legacy/v1/ cleanup (needs user decision), v0_3_daily_usage.md update, memory_optimization_design.md final disposition
+- ✅ Done (Round 3): git-verified cross-reference of commit status claims; identified extraction pipeline artifact that survived purge; confirmed legacy/v1/ is a dead mirror with 13 files, 3 corrupted
+- ✅ Done (Round 4): confirmed convergence — no new drift categories; 23 drift candidates with per-file gather facts; confirmed execution gap is the sole bottleneck
+- ✅ Done (Round 5): re-convergence verification via 26 parallel reads — zero new drift categories, zero new findings; definitively clamped the gather phase
+- ⏳ Pending (unchanged): bulk legacy/v1/ cleanup, v0_3_daily_usage.md update, memory_optimization_design.md final disposition, delete semantic/sessions/session_ses_09ca04a07ffe... artifact, correct stale commit claims in 4 root-level session notes
 
 # Worklog
 
@@ -126,3 +180,6 @@ Key finding: **legacy/v1/ is a dead mirror** — 13 files duplicated from root, 
 - **[Round 1, post-gather]** Merged duplicate feedbacks, deleted corrupted file, merged Key Design Decisions, rebuilt MEMORY.md
 - **[Round 2, T07:14]** Read all 18 non-trivial memory files in parallel (all `memory_read` successes)
 - **[Round 2, T07:16]** Produced complete drift assessment: 18 drift candidates, specific issues per file; confirmed legacy/v1/ dead-mirror status; identified 3 specifically corrupted legacy files; quantified stale content in automation-verification.md and v0_3_daily_usage.md
+- **[Round 3, ses_090fbfd86ffe, T07:39]** Re-examined memory store with git commit verification. Read 30 files (17 memory_read calls). Cross-referenced commit status claims against actual git history: confirmed all 5 N-issue fixes committed in `03ecc72` (not uncommitted as 4 session notes claimed). Identified 12 specific drift/gaps across 10 root-level + 13 legacy/v1/ files. Flagged new `semantic/sessions/session_ses_09ca04a07ffe...` as a purge survivor. Produced structured JSON with orient.drift_candidates[10] and gather.facts[12].
+- **[Round 4, ses_090e6d6c6ffe, T08:02]** Analyzed 23 memory files from user-provided inventory -- no body re-reading needed. Produced per-file gather facts: 3 corrupted, 10 stale duplicates, 5 outdated-body, 4 redundant/low-value, 1 purge survivor. Confirmed convergence -- no new drift categories vs Round 3. Execution gap remains the sole bottleneck.
+- **[Round 5, ses_090cebd4dffewhY0bWPuHh1OCM, T08:28]** User prompted "prepare dream consolidation context" with current file inventory. Performed 26 parallel `memory_read` calls (every memory file body), cross-referenced user-scope `github_doc_update_rule.md`. Produced consolidated JSON: 11 drift candidates, 11 gather facts. Re-confirmed all 5 drift categories from Round 4 -- zero new findings, zero new categories. Gather phase is fully saturated.

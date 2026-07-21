@@ -14,6 +14,7 @@ import { mkdir, readdir, readFile, writeFile, unlink, stat, appendFile, open } f
 import type { MemoryHeader } from "./config.js"
 import { isSafePath, checkSymlinkSafe } from "./pathguard.js"
 import { parseConfidence } from "./config.js"
+import { MANIFEST_AUTO_GENERATED_HEADER } from "./lifecycle/archive-types.js"
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -49,6 +50,13 @@ export interface MemoryStore {
 
   /** Get the memory directory path. */
   getDir(): string
+
+  /**
+   * Rebuild the index from existing memory files.
+   * v0.3.4: optionally partition by status for dual manifest (MEMORY.md + ARCHIVE.md).
+   * Returns counts of active and archived entries written.
+   */
+  rebuildIndex(options?: { archiveIndexEnabled?: boolean }): Promise<{ active: number; archived: number }>
 }
 
 // ---------------------------------------------------------------------------
@@ -57,16 +65,16 @@ export interface MemoryStore {
 
 export function parseFrontmatter(
   content: string,
-): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string } {
+): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
   const yaml = match[1]
-  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string } = {}
+  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string } = {}
   for (const line of yaml.split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/)
     if (!kv) continue
     const [, key, value] = kv
-    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence" || key === "last_recalled_at") {
+    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence" || key === "last_recalled_at" || key === "status") {
       (result as Record<string, unknown>)[key] = value.trim()
     } else if (key === "schema_version") {
       result.schema_version = parseInt(value.trim(), 10)
@@ -111,7 +119,7 @@ export class FileSystemStore implements MemoryStore {
           const stats = await stat(filePath)
           // Read only the first few KB for frontmatter (avoid reading entire large files)
           const fh = await open(filePath, "r")
-          let fm: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string }
+          let fm: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string }
           try {
             const buf = Buffer.alloc(4096)
             const { bytesRead } = await fh.read(buf, 0, 4096, 0)
@@ -132,6 +140,8 @@ export class FileSystemStore implements MemoryStore {
             schemaVersion: fm.schema_version,
             recallCount: fm.recall_count ?? 0,
             lastRecalledAt: fm.last_recalled_at ?? null,
+            // v0.3.4: parse status field — defaults to "active" when absent
+            status: fm.status === "archived" ? "archived" : "active",
           }
         }),
       )
@@ -239,6 +249,75 @@ export class FileSystemStore implements MemoryStore {
     } catch {
       // File doesn't exist or can't be read — silent
     }
+  }
+
+  async rebuildIndex(
+    options?: { archiveIndexEnabled?: boolean },
+  ): Promise<{ active: number; archived: number }> {
+    const archiveEnabled = options?.archiveIndexEnabled ?? false
+    const entries = await readdir(this.dir, { recursive: true })
+    const mdFiles = entries.filter(
+      (f) =>
+        f.endsWith(".md") &&
+        basename(f) !== ENTRYPOINT_NAME &&
+        basename(f) !== "ARCHIVE.md",
+    )
+
+    const activeLines: string[] = []
+    const archivedLines: string[] = []
+
+    for (const filename of mdFiles) {
+      try {
+        const content = await readFile(join(this.dir, filename), {
+          encoding: "utf-8",
+        })
+        const fm = parseFrontmatter(content)
+        const name = fm.name || fm.description || filename
+        const desc = fm.description ?? ""
+        const line = `- [${name}](${filename}) — ${desc}`
+        if (fm.status === "archived" && archiveEnabled) {
+          archivedLines.push(line)
+        } else {
+          activeLines.push(line)
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+
+    // Sort alphabetically for idempotent rebuilds
+    activeLines.sort()
+    archivedLines.sort()
+
+    // Write MEMORY.md — always, with active entries
+    const activeContent =
+      MANIFEST_AUTO_GENERATED_HEADER +
+      "\r\n\r\n" +
+      activeLines.join("\r\n") +
+      (activeLines.length > 0 ? "\r\n" : "")
+    await writeFile(join(this.dir, ENTRYPOINT_NAME), activeContent, "utf-8")
+
+    // Write ARCHIVE.md — only if archiveIndex enabled and there are archived entries
+    if (archiveEnabled) {
+      const archivePath = join(this.dir, "ARCHIVE.md")
+      if (archivedLines.length > 0) {
+        const archiveContent =
+          MANIFEST_AUTO_GENERATED_HEADER +
+          "\r\n\r\n" +
+          archivedLines.join("\r\n") +
+          "\r\n"
+        await writeFile(archivePath, archiveContent, "utf-8")
+      } else {
+        // Lazy-delete: no archived entries → no ARCHIVE.md
+        try {
+          await unlink(archivePath)
+        } catch {
+          // Already doesn't exist — fine
+        }
+      }
+    }
+
+    return { active: activeLines.length, archived: archivedLines.length }
   }
 }
 

@@ -20,9 +20,11 @@ import { readdir, readFile, writeFile, mkdir, unlink, rmdir } from "fs/promises"
 import { join, basename } from "path"
 import type { MemoryStore } from "./store.js"
 import type { MemoryPluginConfig } from "./config.js"
-import { parseFrontmatter } from "./store.js"
 import { getStagingDir, getConflictsDir } from "./paths.js"
 import { error as logError } from "./log.js"
+
+// Note: rebuildIndex() is implemented on MemoryStore (FileSystemStore) directly.
+// v0.3.4 dual-manifest partition by status lives there. promotion.ts calls it.
 
 // ---------------------------------------------------------------------------
 // Confidence priority (enforced by code, not LLM judgment)
@@ -167,71 +169,17 @@ async function rebuildMemoryIndex(
   store: MemoryStore,
   config: MemoryPluginConfig,
 ): Promise<void> {
-  const memories = await store.list()
-
-  // Filter out internal directories
-  const externalMemories = memories.filter(
-    (m) =>
-      !m.filename.startsWith("semantic/") &&
-      !m.filename.startsWith("processing/") &&
-      !m.filename.startsWith("fact/") &&
-      !m.filename.startsWith("legacy/"),
-  )
-
-  // Sort by type (canonical order) then filename
-  const typeOrder: Record<string, number> = {
-    user: 0,
-    feedback: 1,
-    project: 2,
-    reference: 3,
+  // v0.3.4: delegates to store.rebuildIndex() which handles dual-manifest
+  // partition by status when archiveIndex feature is enabled.
+  // - archiveIndex=false (default): all files → MEMORY.md (v0.3.3 behavior)
+  // - archiveIndex=true: active → MEMORY.md, archived → ARCHIVE.md (lazy-create)
+  try {
+    await store.rebuildIndex({
+      archiveIndexEnabled: config.experimental?.archiveIndex === true,
+    })
+  } catch (err) {
+    logError("memory:promotion", `failed to rebuild index: ${err instanceof Error ? err.message : String(err)}`)
   }
-
-  const sorted = [...externalMemories].sort((a, b) => {
-    const ta = a.type !== undefined ? (typeOrder[a.type] ?? 99) : 99
-    const tb = b.type !== undefined ? (typeOrder[b.type] ?? 99) : 99
-    if (ta !== tb) return ta - tb
-    return a.filename.localeCompare(b.filename)
-  })
-
-  // Build index lines: - [Name](filename.md) — description
-  const indexLines: string[] = []
-  for (const m of sorted) {
-    try {
-      const content = await store.read(m.filename)
-      const fm = parseFrontmatter(content)
-      const name = fm.name ?? m.description ?? m.filename
-      const desc = m.description ?? ""
-      indexLines.push(`- [${name}](${m.filename}) — ${desc}`)
-    } catch {
-      // Skip unreadable files
-    }
-  }
-
-  let newIndex = indexLines.join("\n")
-
-  // Enforce maxLines cap
-  let lines = newIndex.split("\n")
-  if (lines.length > config.entrypoint.maxLines) {
-    newIndex = lines.slice(0, config.entrypoint.maxLines).join("\n") + "\n"
-    lines = newIndex.split("\n")
-  }
-
-  // Enforce maxBytes cap
-  const encoder = new TextEncoder()
-  if (encoder.encode(newIndex).length > config.entrypoint.maxBytes) {
-    const keep: string[] = []
-    let bytes = 0
-    for (const line of lines) {
-      const lineBytes = encoder.encode(line + "\n").length
-      if (bytes + lineBytes > config.entrypoint.maxBytes) break
-      keep.push(line)
-      bytes += lineBytes
-    }
-    newIndex = keep.join("\n")
-    if (!newIndex.endsWith("\n")) newIndex += "\n"
-  }
-
-  await store.updateIndex(newIndex)
 }
 
 // ---------------------------------------------------------------------------

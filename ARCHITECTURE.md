@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.3.3 | **Last Updated**: 2026-07-20 | **Tests**: 587 pass / 63 files (2 pre-existing C2/C3 SDK timeouts require live OpenCode instance)
+> **Version**: 0.3.4 Phase 0 | **Last Updated**: 2026-07-21 | **Tests**: 668 pass / 67 files (1 pre-existing C1 SDK timeout requires live OpenCode instance)
 
 ## Table of Contents
 
@@ -214,6 +214,13 @@ session.idle event
 | `log.ts` | 133 | File-based logger (avoids terminal pollution) | No |
 | `promotion.ts` | ~380 | Staging → promotion: conflict resolution, confidence override | No |
 | `migration.ts` | ~170 | v1 → v2 schema migration | No |
+| **archive-types.ts** | 97 | ArchiveEntry types, buildArchiveLine, parseArchiveLine, MANIFEST_AUTO_GENERATED_HEADER (v0.3.4) | No |
+
+### Index Modules (`src/index/`)
+
+| File | Lines | Role | LLM? |
+|------|-------|------|------|
+| `archive-index.ts` | 199 | ArchiveIndexManager — readArchive/writeArchive/addEntry/removeEntry for ARCHIVE.md (v0.3.4) | No |
 
 ### Module Dependencies
 
@@ -239,10 +246,13 @@ index.ts
   ├── capture.ts (captureSession)
   ├── adapter.ts (createRuntimeAdapter)
   ├── tools.ts (defineMemoryTools)
+  │     └── store.ts (list, read, write — MemoryStore interface)
   ├── scan.ts (scanMemoryFiles, formatMemoriesByScope)
   ├── state.ts (updateState, recordEvent)
   ├── log.ts (initLogger, error)
-  └── migration.ts (runMigrationIfNeeded)
+  ├── migration.ts (runMigrationIfNeeded)
+  └── index/archive-index.ts (readArchive, writeArchive, addEntry, removeEntry — v0.3.4)
+        └── lifecycle/archive-types.ts (ArchiveEntry, buildArchiveLine, parseArchiveLine)
 
 evaluation/ (shared primitives — v0.3+)
   ├── types.ts          EvaluationResult, EvaluationContext

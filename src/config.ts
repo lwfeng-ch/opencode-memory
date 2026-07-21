@@ -153,6 +153,8 @@ export interface MemoryHeader {
   /** Recall usage tracking (P1) */
   recallCount: number
   lastRecalledAt: string | null
+  /** v0.3.4: Lifecycle status — defaults to "active" for backward compat */
+  status?: "active" | "archived"
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +307,30 @@ export interface MemoryPluginConfig {
     dream: { agent?: string; model?: string; category?: string }
     recall: { agent?: string; model?: string; category?: string }
   }
+
+  /**
+   * Experimental features (v0.3.4+).
+   *
+   * These are opt-in features that change core contracts.
+   * Each flag defaults to false — users must explicitly enable.
+   * Once a feature stabilizes (no regressions for one version), it becomes
+   * default true and the flag is removed in the next version.
+   */
+  experimental?: {
+    /**
+     * Enable dual-manifest archive index (v0.3.4 Phase 0).
+     *
+     * - false (default): single MEMORY.md, all files indexed together (v0.3.3 behavior)
+     * - true: dual manifest — MEMORY.md (active only) + ARCHIVE.md (archived only, lazy-created)
+     *
+     * When enabled, RepairService.archive() / restore() also update both manifests
+     * atomically (manifest-pair-first, frontmatter-last). memory_list defaults to
+     * active-only; use `--all` or `--archived` to access archive entries.
+     *
+     * Do NOT toggle mid-session — ARCHIVE.md may become inconsistent.
+     */
+    archiveIndex?: boolean
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +429,11 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
     dream: { category: "deep" },
     recall: { agent: "explore" },
   },
+
+  // v0.3.4+: experimental features, all default false
+  experimental: {
+    archiveIndex: false,
+  },
 }
 
 /** Merge user-provided options with defaults. */
@@ -428,6 +459,7 @@ export function resolveConfig(
         dream: { ...DEFAULT_CONFIG.agents.dream },
         recall: { ...DEFAULT_CONFIG.agents.recall },
       },
+      experimental: { ...DEFAULT_CONFIG.experimental },
     }
   }
   return {
@@ -448,6 +480,7 @@ export function resolveConfig(
       dream: { ...DEFAULT_CONFIG.agents.dream, ...overrides.agents?.dream },
       recall: { ...DEFAULT_CONFIG.agents.recall, ...overrides.agents?.recall },
     },
+    experimental: { ...DEFAULT_CONFIG.experimental, ...overrides.experimental },
   }
 }
 
@@ -533,6 +566,10 @@ interface ConfigFile {
     extraction?: { agent?: string; model?: string; category?: string }
     dream?: { agent?: string; model?: string; category?: string }
     recall?: { agent?: string; model?: string; category?: string }
+  }
+  /** v0.3.4+ experimental features — opt-in only, default false */
+  experimental?: {
+    archive_index?: boolean
   }
 }
 
@@ -649,6 +686,10 @@ export async function loadConfig(
           model: file.agents?.recall?.model,
           category: file.agents?.recall?.category,
         },
+      },
+
+      experimental: {
+        archiveIndex: file.experimental?.archive_index ?? DEFAULT_CONFIG.experimental!.archiveIndex,
       },
     }
   } catch {

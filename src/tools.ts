@@ -246,31 +246,64 @@ export function defineMemoryTools(
 
     // -----------------------------------------------------------------------
     // memory_list — List all memories with metadata
+    // v0.3.4: defaults to active-only, --all/--archived flags for archive access
     // -----------------------------------------------------------------------
     memory_list: {
       description: [
-        "List all saved memories with their filename, type, description, and age.",
+        "List saved memories with their filename, type, description, and age.",
         "",
-        "Use this to check what memories exist before saving a new one",
-        "(to avoid duplicates) or when you need to recall what's been stored.",
+        "v0.3.4: Defaults to active memories only (current knowledge).",
+        "Use includeArchived=true to show both active + archived.",
+        "Use archivedOnly=true to show only archived memories.",
         "",
         "Returns a table with columns: filename | type | description | age.",
       ].join("\n"),
-      args: {},
-      execute: async () => {
+      args: {
+        includeArchived: z.boolean().default(false).describe(
+          "If true, include archived memories in the listing. Default: false (active only)."
+        ),
+        archivedOnly: z.boolean().default(false).describe(
+          "If true, show ONLY archived memories (excludes active). Default: false."
+        ),
+      },
+      execute: async (args) => {
+        const includeArchived = Boolean(args.includeArchived)
+        const archivedOnly = Boolean(args.archivedOnly)
+
         const projectHeaders = await projectStore.list()
         const userHeaders = userStore ? await userStore.list() : []
 
-        const rows: string[] = []
-        for (const h of projectHeaders) rows.push(formatMemoryRow(h))
-        for (const h of userHeaders) rows.push(formatMemoryRow(h, "user"))
-
-        if (rows.length === 0) {
-          return { output: "No memories found." }
+        // v0.3.4: filter by lifecycle status
+        // - archivedOnly=true → only show status="archived"
+        // - includeArchived=false (default) → only show status != "archived" (i.e., active or undefined)
+        // - includeArchived=true → show all
+        const filterFn = (h: MemoryHeader): boolean => {
+          const isArchived = h.status === "archived"
+          if (archivedOnly) return isArchived
+          if (includeArchived) return true
+          return !isArchived
         }
 
+        const filteredProject = projectHeaders.filter(filterFn)
+        const filteredUser = userHeaders.filter(filterFn)
+
+        const rows: string[] = []
+        for (const h of filteredProject) rows.push(formatMemoryRow(h))
+        for (const h of filteredUser) rows.push(formatMemoryRow(h, "user"))
+
+        if (rows.length === 0) {
+          if (archivedOnly) return { output: "No archived memories found." }
+          if (includeArchived) return { output: "No memories found." }
+          return { output: "No active memories found. (Use includeArchived=true to see archived memories.)" }
+        }
+
+        const header = archivedOnly
+          ? "Archived Memories"
+          : includeArchived
+            ? "All Memories"
+            : "Active Memories"
         const table = ["filename | type | description | age", "--- | --- | --- | ---", ...rows].join("\n")
-        return { output: table }
+        return { output: `${header} (${rows.length})\n\n${table}` }
       },
     },
 
@@ -509,34 +542,19 @@ export function defineMemoryTools(
       ].join("\n"),
       args: {},
       execute: async () => {
-        // List all files from both stores
-        const projectHeaders = await projectStore.list()
-        const userHeaders = userStore ? await userStore.list() : []
-
-        // Sort by type then filename (same order as dream prunePhase)
-        const typeOrder: Record<string, number> = {
-          user: 0, feedback: 1, project: 2, reference: 3,
-        }
-        const allHeaders = [...projectHeaders, ...userHeaders]
-        allHeaders.sort((a, b) => {
-          const ta = a.type ? (typeOrder[a.type] ?? 99) : 99
-          const tb = b.type ? (typeOrder[b.type] ?? 99) : 99
-          if (ta !== tb) return ta - tb
-          return a.filename.localeCompare(b.filename)
-        })
-
-        // Build index lines
-        const lines: string[] = []
-        for (const h of allHeaders) {
-          const name = h.description ?? h.filename
-          const desc = h.description ?? ""
-          lines.push(`- [${name}](${h.filename}) — ${desc}`)
+        // Rebuild both stores using store.rebuildIndex()
+        const projectResult = await projectStore.rebuildIndex()
+        let userResult = { active: 0, archived: 0 }
+        if (userStore) {
+          userResult = await userStore.rebuildIndex()
         }
 
-        const indexContent = lines.join("\n") + (lines.length > 0 ? "\n" : "")
-        await projectStore.updateIndex(indexContent)
+        const totalActive = projectResult.active + userResult.active
+        const totalArchived = projectResult.archived + userResult.archived
 
-        return { output: `Rebuilt MEMORY.md: ${lines.length} entries (${projectHeaders.length} project, ${userHeaders.length} user)` }
+        return {
+          output: `Rebuilt MEMORY.md: ${totalActive} active + ${totalArchived} archived entries (${projectResult.active} project, ${userResult.active} user)`,
+        }
       },
     },
 
