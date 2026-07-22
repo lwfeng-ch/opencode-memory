@@ -19,6 +19,9 @@ export const PROVENANCE_ACTOR = {
   SYSTEM: "system",
   MIGRATION: "migration",
   REPAIR: "repair",
+  EXTRACTION: "extraction",
+  DREAM: "dream",
+  CONFLICT_RESOLUTION: "conflict-resolution",
 } as const
 
 export const PROVENANCE_SOURCE_TYPE = {
@@ -60,7 +63,7 @@ export type ProvenanceOverrideSourceType =
   | "migration"
   | "repair"
 
-export type ProvenanceActor = "user" | "system" | "migration" | "repair"
+export type ProvenanceActor = "user" | "system" | "migration" | "repair" | "extraction" | "dream" | "conflict-resolution"
 
 export type ProvenanceAction =
   | "created"
@@ -78,7 +81,7 @@ export interface MemoryProvenance {
 
   created: {
     timestamp: number // Unix epoch ms
-    actor: "user" | "system" | "migration"
+    actor: ProvenanceActor
     model?: string
     extractorVersion?: string
   }
@@ -195,8 +198,8 @@ export function validateProvenance(p: unknown): {
     if (typeof cr.timestamp !== "number" || cr.timestamp <= 0) {
       errors.push("created.timestamp must be a positive number")
     }
-    if (!cr.actor || !["user", "system", "migration"].includes(cr.actor as string)) {
-      errors.push("created.actor must be 'user', 'system', or 'migration'")
+    if (!cr.actor || !["user", "system", "migration", "repair", "extraction", "dream", "conflict-resolution"].includes(cr.actor as string)) {
+      errors.push(`created.actor must be a valid ProvenanceActor, got: "${cr.actor}"`)
     }
   }
 
@@ -235,7 +238,7 @@ export function validateProvenance(p: unknown): {
       if (typeof e.timestamp !== "number") {
         errors.push(`history[${i}] has invalid timestamp`)
       }
-      if (e.actor && !["user", "system", "repair", "migration"].includes(e.actor as string)) {
+      if (e.actor && !["user", "system", "migration", "repair", "extraction", "dream", "conflict-resolution"].includes(e.actor as string)) {
         errors.push(`history[${i}] has invalid actor: "${e.actor}"`)
       }
       // Check for exact duplicate action+timestamp (prevents injection of identical events)
@@ -258,7 +261,7 @@ export function isValidProvenanceEvent(value: unknown): value is ProvenanceEvent
     ["created", "updated", "merged", "archived", "restored"].includes(e.action) &&
     typeof e.timestamp === "number" &&
     typeof e.actor === "string" &&
-    ["user", "system", "repair", "migration"].includes(e.actor)
+    ["user", "system", "migration", "repair", "extraction", "dream", "conflict-resolution"].includes(e.actor)
   )
 }
 
@@ -268,7 +271,7 @@ export function isValidProvenanceEvent(value: unknown): value is ProvenanceEvent
 
 export function createProvenance(
   source: MemoryProvenance["source"],
-  actor: "user" | "system" | "migration",
+  actor: ProvenanceActor,
   extraction?: MemoryProvenance["extraction"],
   model?: string,
   extractorVersion?: string,

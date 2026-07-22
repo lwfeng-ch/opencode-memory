@@ -363,7 +363,7 @@ bun run scripts/migrate-archive-index.ts --apply --scope=project    # execute mi
 
 491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
 
-> **Note:** As of v0.4.0, the test suite has grown to **818 tests across 80 files** (818 pass + 0 regression, 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
+> **Note:** As of v0.4.1, the test suite has grown to **916 tests across 88 files** (914 pass + 2 pre-existing failures: C1 SDK timeout + flaky golden-extra duration). See Changelog below for per-version details.
 
 ## Design Principles
 
@@ -449,6 +449,45 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.4.1 — Memory Worthiness Engine (2026-07-22)
+
+**MemoryPathPolicy**
+- `MemoryPathPolicy` — ignore patterns for `.memory-backup/`, `.git/`, `node_modules/`, `MEMORY.md`, `ARCHIVE.md`
+- Session-aware filtering: `ignoreSessions` option for audit vs default consumers
+- Windows path compatibility (backslash → forward slash normalization)
+
+**CoverageModel**
+- `CoverageModel` interface with 3 implementations:
+  - `LinearBufferedCoverage`: `0.5 + 0.5×coverage` for small sets (<100)
+  - `SqrtCoverage`: `sqrt(coverage)` for medium sets (100-1000)
+  - `LogCoverage`: `log(1+covered)/log(1+total)` for large sets (≥1000)
+- `selectCoverageModel()` auto-selects based on total set size
+
+**ProvenanceValidator**
+- `evaluateSourceTrust()` — source trust scores: user/feedback=1.0, extraction=0.8, session=0.6, migration=0.4
+- `evaluateExtractionConfidence()` — method × confidenceScore: explicit=direct, llm×0.9/0.7, dream×0.8, no extraction=0.5
+- `evaluateHistoryIntegrity()` — created event presence, timestamp monotonicity
+- `calibrateClaimConfidence()` — confidence × extraction confidence with anomaly warnings
+- `computeProvenanceConfidence()` — aggregates 4 sub-dimensions into overall score
+
+**LifecycleValidator**
+- `evaluateStatusAppropriateness()` — checks if archived/active status matches recall recency
+- `evaluateStability()` — counts archive/restore events in history (0-1 stable, 2-3 oscillation warning, 4+ significant oscillation)
+- `computeLifecycleValidity()` — combines status × stability × recency
+
+**WorthinessScore**
+- 3-dimension multiplicative model: `contentQuality × lifecycleValidity × provenanceConfidence`
+- 5 recommendation levels (keep/review/archive/delete/critical)
+- `ValidationFinding` structure with severity, action, reasons, metadata
+
+**ProvenanceActor Unification**
+- Added `extraction`, `dream`, `conflict-resolution` to `ProvenanceActor` union type
+- Updated `validateProvenance()`, `isValidProvenanceEvent()`, `createProvenance()` to accept all 7 actors
+- Backward compatible — existing provenance files parse correctly
+
+**Test growth:** 818 → 916 (+98), 88 files, 0 regression
+**TypeScript:** `tsc --noEmit` clean
 
 ### v0.4.0 — Provenance Foundation (2026-07-22)
 

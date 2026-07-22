@@ -1,4 +1,4 @@
-# opencode-memory
+﻿# opencode-memory
 
 [English](README.md) | 简体中文
 
@@ -81,6 +81,38 @@ src/
 │       ├── conflict.ts   配对主题相似度 + 版本号/技术切换冲突检测
 │       ├── quality.ts    frontmatter 完整性、截断描述、空内容
 │       └── staleness.ts  180 天清理规则，explicit 记忆永不过期
+├── llm/                  LLM Provider 抽象 (v0.3.2)
+│   ├── provider.ts       CompletionProvider/EmbeddingProvider/ModelProvider 接口
+│   ├── openai.ts          OpenAI provider（fetch + retry）
+│   ├── qwen.ts            Qwen/DashScope provider
+│   └── adapter-bridge.ts  v0.3.3 AdapterLLMProvider 桥接 RuntimeAdapter
+├── repair/               v0.3.3 修复基础设施
+│   ├── candidate.ts       RepairCandidate + assessRisk + scope 字段
+│   ├── queue.ts           FileCandidateQueue（文件 JSON 队列）
+│   ├── service.ts         RepairService（archive/delete/restore + frontmatter）
+│   └── audit.ts           AuditLog（JSONL）
+├── lifecycle/            v0.3.3 生命周期元数据
+│   └── types.ts           MemoryStatus + LifecycleMetadata + parseLifecycle + lifecycleScoreMultiplier
+├── memory/               v0.4.0 数据来源层
+│   └── provenance.ts      MemoryProvenance + 验证 + 序列化 + 合并
+├── validation/           v0.4.1 价值评估与验证
+│   ├── path-policy.ts     MemoryPathPolicy（忽略模式）
+│   ├── coverage-model.ts  CoverageModel（3 种实现）
+│   ├── worthiness.ts      WorthinessScore + ValidationFinding
+│   └── dimensions/
+│       ├── provenance.ts  ProvenanceValidator
+│       └── lifecycle.ts   LifecycleValidator
+├── extraction/           v0.3.4 模块化提取流水线
+│   ├── index.ts           公共导出
+│   ├── types.ts           接口定义
+│   ├── builder.ts         Prompt 构建
+│   ├── parser.ts          LLM 响应解析
+│   ├── validator.ts       候选验证
+│   ├── writer.ts          IO + 格式化
+│   └── core.ts            流程编排
+├── index/                v0.3.4 索引管理器
+│   └── archive-index.ts   ArchiveIndexManager（CRUD for ARCHIVE.md）
+├── migration/scanner.ts  v0.3.3 LegacyScanner + SessionScanner + MemoryMigrationScanner
 ├── message-cache.ts      追加式 JSONL 消息缓存（chat.message → fact/messages/*.jsonl）
 ├── explicit-feedback.ts  检测显式信号（"记住"/"always use"）— 直接保存，绕过 Dream
 ├── candidate.ts          类型化记忆候选，置信度分层 Dream 路由
@@ -591,3 +623,4 @@ MIT
 
 - KAIROS 提取、两阶段召回、Dream 蒸馏、遥测、记忆压力
 - 139 项测试，18 个文件
+

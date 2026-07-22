@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.4.0 | **Last Updated**: 2026-07-22 | **Tests**: 818 pass / 80 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
+> **Version**: 0.4.1 | **Last Updated**: 2026-07-22 | **Tests**: 916 pass / 88 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
 
 ## Table of Contents
 
@@ -79,6 +79,14 @@
 │  │  (memory/provenance.ts)                                          │  │
 │  │  MemoryProvenance + Confidence dual-track + serialization        │  │
 │  │  Auto-injected by handler, preserved by repair/promotion        │  │
+│  └──────────────────────────┬─────────────────────────────────────┘  │
+│                             │                                        │
+│  ┌──────────────────────────┴─────────────────────────────────────┐  │
+│  │           Validation Layer (v0.4.1)                              │  │
+│  │  (validation/: path-policy, coverage-model, worthiness,         │  │
+│  │   dimensions/provenance, dimensions/lifecycle)                  │  │
+│  │  MemoryPathPolicy + CoverageModel + ProvenanceValidator +       │  │
+│  │  LifecycleValidator + WorthinessScore                           │  │
 │  └──────────────────────────┬─────────────────────────────────────┘  │
 │                             │                                        │
 │  ┌──────────────────────────┴─────────────────────────────────────┐  │
@@ -373,7 +381,14 @@ opencode-memory/
 │   └── migrate-provenance.ts  bun run scripts/migrate-provenance.ts --dry-run|--apply|--rollback (v0.4.0)
 ├── memory/               Provenance layer (v0.4.0)
 │   └── provenance.ts     MemoryProvenance, validation, serialization, merge
-├── test/                 80 test files (818 tests; 0 regression)
+├── validation/           Memory worthiness & validation (v0.4.1)
+│   ├── path-policy.ts    MemoryPathPolicy (ignore patterns, session filter)
+│   ├── coverage-model.ts CoverageModel interface + 3 implementations (LinearBuffered/Sqrt/Log)
+│   ├── worthiness.ts     WorthinessScore + ValidationFinding (content × lifecycle × provenance)
+│   └── dimensions/
+│       ├── provenance.ts ProvenanceValidator (sourceTrust, extractionConfidence, historyIntegrity, claimCalibration)
+│       └── lifecycle.ts  LifecycleValidator (statusAppropriateness, stability)
+├── test/                 88 test files (916 tests; 0 regression)
 ├── memory.config.example.json   Configuration template
 ├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config
@@ -736,7 +751,7 @@ type TelemetryEventType =
 | Quality | `store.ts` parseFrontmatter | Missing fields, truncated descriptions, empty bodies |
 | Staleness | `staleness.ts` memoryAgeDays | 180-day never-recalled non-explicit memories |
 
-**Constraint:** Audit is READ-ONLY — never modifies or deletes memory files. Repair is v0.4.0.
+**Constraint:** Audit is READ-ONLY — never modifies or deletes memory files. Repair is v0.3.3.
 
 ### Benchmark Framework
 
