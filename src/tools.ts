@@ -22,6 +22,7 @@ import type { ToolDefinition } from "@opencode-ai/plugin"
 import type { MemoryStore } from "./store.js"
 import type { MemoryPluginConfig, MemoryHeader } from "./config.js"
 import { MEMORY_TYPES, MEMORY_SCOPES, parseMemoryType, resolveMemoryScope, parseMemoryScope, CONFIDENCE_LEVELS, parseConfidence } from "./config.js"
+import { serializeProvenance, createProvenance, type ProvenanceOverride } from "./memory/provenance.js"
 import { deleteEntry } from "./store.js"
 import { getDailyLogPath } from "./paths.js"
 import { loadState } from "./state.js"
@@ -66,6 +67,7 @@ function buildFrontmatter(
   type: string,
   scope?: string,
   confidence?: string,
+  provenance?: string, // v0.4.0: serialized JSON string
 ): string {
   const lines = [
     "---",
@@ -75,9 +77,34 @@ function buildFrontmatter(
   ]
   if (scope !== undefined) lines.push(`scope: ${scope}`)
   if (confidence !== undefined) lines.push(`confidence: ${confidence}`)
+  if (provenance !== undefined) lines.push(`provenance: ${provenance}`)
   lines.push("schema_version: 1")
   lines.push("---")
   return lines.join("\n")
+}
+
+/**
+ * Inject provenance context for a memory save operation.
+ *
+ * v0.4.0: provenance is automatically injected by the handler, not passed by the caller.
+ * The override parameter is for internal system calls (extraction, dream, migration, repair).
+ */
+function injectProvenance(
+  sourceType: "user" | "session" | "extraction" | "feedback" | "migration",
+  sessionId?: string,
+  override?: ProvenanceOverride,
+): string | undefined {
+  const prov = createProvenance(
+    { type: sourceType, sessionId },
+    sourceType === "user" ? "user" : "system",
+    override?.extraction
+      ? { method: override.extraction.method ?? "llm", confidenceScore: override.extraction.confidenceScore }
+      : sourceType === "extraction"
+        ? { method: "llm" }
+        : undefined,
+    override?.model,
+  )
+  return serializeProvenance(prov)
 }
 
 /** Parse a MEMORY.md index into lines. */
@@ -189,6 +216,7 @@ export function defineMemoryTools(
         type: z.enum(MEMORY_TYPES).describe("Memory type: user (about the person), feedback (guidance on approach), project (ongoing work context), reference (pointers to external systems)."),
         scope: z.enum(MEMORY_SCOPES).optional().describe("Memory scope: 'user' (cross-project, shared) or 'project' (this project only). If omitted, defaults to type-based routing: user/feedback → user scope, project/reference → project scope."),
         confidence: z.enum(CONFIDENCE_LEVELS).optional().describe("Trust level: 'explicit' (user explicitly stated), 'inferred' (agent deduced), 'uncertain' (not sure but worth recording). Default: inferred."),
+        _provenanceOverride: z.any().optional().describe("[internal] System-only provenance override — ignored when called by user."),
       },
       execute: async (args) => {
         const filename = String(args.filename ?? "")
@@ -216,8 +244,17 @@ export function defineMemoryTools(
         const scope = resolveMemoryScope(parsedType, parseMemoryScope(args.scope))
         const confidence = parseConfidence(args.confidence)
 
+        // v0.4.0: Inject provenance
+        // AC-7: User-provided _provenanceOverride is rejected (system-only)
+        const provenanceOverride = args._provenanceOverride as ProvenanceOverride | undefined
+        const provenance = injectProvenance(
+          "user",
+          undefined, // sessionId not available in tool context; will be set by extraction pipeline
+          provenanceOverride,
+        )
+
         // Build frontmatter + content with new fields
-        const fullContent = buildFrontmatter(name, description, parsedType, scope, confidence) + "\n" + content
+        const fullContent = buildFrontmatter(name, description, parsedType, scope, confidence, provenance) + "\n" + content
 
         // Route to correct store based on scope
         const targetStore = (scope === "user" && userStore) ? userStore : projectStore

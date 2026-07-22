@@ -63,13 +63,25 @@ export interface MemoryStore {
 // Frontmatter parser (reads name/description/type/scope/confidence/schema_version)
 // ---------------------------------------------------------------------------
 
-export function parseFrontmatter(
-  content: string,
-): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string; archived_at?: string } {
+export interface FrontmatterResult {
+  name?: string
+  description?: string
+  type?: string
+  scope?: string
+  confidence?: string
+  schema_version?: number
+  recall_count?: number
+  last_recalled_at?: string
+  status?: string
+  archived_at?: string
+  provenance?: string // v0.4.0: raw JSON string
+}
+
+export function parseFrontmatter(content: string): FrontmatterResult {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
   const yaml = match[1]
-  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string; archived_at?: string } = {}
+  const result: FrontmatterResult = {}
   for (const line of yaml.split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/)
     if (!kv) continue
@@ -80,6 +92,8 @@ export function parseFrontmatter(
       result.schema_version = parseInt(value.trim(), 10)
     } else if (key === "recall_count") {
       result.recall_count = parseInt(value.trim(), 10) || 0
+    } else if (key === "provenance") {
+      result.provenance = value.trim()
     }
   }
   return result
@@ -242,6 +256,7 @@ export class FileSystemStore implements MemoryStore {
       if (fm.scope) lines.push(`scope: ${fm.scope}`)
       if (fm.confidence) lines.push(`confidence: ${fm.confidence}`)
       if (fm.schema_version !== undefined) lines.push(`schema_version: ${fm.schema_version}`)
+      if (fm.provenance) lines.push(`provenance: ${fm.provenance}`)
       lines.push(`recall_count: ${newCount}`)
       lines.push(`last_recalled_at: ${now}`)
       lines.push("---", "")

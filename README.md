@@ -363,7 +363,7 @@ bun run scripts/migrate-archive-index.ts --apply --scope=project    # execute mi
 
 491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
 
-> **Note:** As of v0.3.4, the test suite has grown to **721 tests across 71 files** (721 pass + 0 regression, 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
+> **Note:** As of v0.4.0, the test suite has grown to **818 tests across 80 files** (818 pass + 0 regression, 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
 
 ## Design Principles
 
@@ -449,6 +449,33 @@ MIT
 - [Qwen Code](https://github.com/QwenLM/qwen-code) — Fact layer architecture, recall-selection concept, symlink protection
 
 ## Changelog
+
+### v0.4.0 — Provenance Foundation (2026-07-22)
+
+**Provenance Schema**
+- `MemoryProvenance` interface — source, created, extraction, history, transformation (reserved)
+- Confidence dual-track: `confidence` (claim level) + `extraction.confidenceScore` (0-1)
+- Serialization: provenance stored as JSON string in YAML frontmatter (compatible with existing flat parser)
+- Validation: `validateProvenance()` + `isValidProvenance()` + `isValidProvenanceEvent()`
+- Helpers: `createProvenance()`, `appendEvent()`, `mergeProvenance()`, `mergeConfidence()`, `mergeSourceType()`
+
+**Injection Pipeline**
+- `memory_save` handler auto-injects provenance via `injectProvenance()` — user never passes provenance
+- `_provenanceOverride` internal parameter for system calls (extraction/dream/migration/repair)
+- AC-7: user-provided `_provenanceOverride` is rejected; user-provided provenance is ignored
+
+**Storage Migration**
+- `parseFrontmatter` extended to recognize `provenance` key
+- `touch()` preserves provenance during recall tracking updates
+- `setFrontmatterField()` (repair service) preserves provenance — only modifies specified fields
+- Migration script: `scripts/migrate-provenance.ts` — dry-run/apply/rollback with backup to `.memory-backup/`
+
+**Repair & Promotion Integration**
+- archive/restore preserve provenance + lifecycle fields
+- `mergeProvenance()` — confidence takes highest rank, `confidenceScore` unchanged, history merged with merged event appended
+
+**Test growth:** 721 → 818 (+97), 80 files, 0 regression
+**TypeScript:** `tsc --noEmit` clean (0 errors)
 
 ### v0.3.3 — Memory Repair Foundation (2026-07-20)
 

@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.3.4 | **Last Updated**: 2026-07-22 | **Tests**: 721 pass / 71 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
+> **Version**: 0.4.0 | **Last Updated**: 2026-07-22 | **Tests**: 818 pass / 80 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
 
 ## Table of Contents
 
@@ -72,6 +72,13 @@
 │  │                    Observability Layer                           │  │
 │  │  (state.ts, telemetry.ts, log.ts, health.ts)                    │  │
 │  │  Pipeline state, JSONL events, health score, file logging       │  │
+│  └──────────────────────────┬─────────────────────────────────────┘  │
+│                             │                                        │
+│  ┌──────────────────────────┴─────────────────────────────────────┐  │
+│  │           Provenance Layer (v0.4.0)                              │  │
+│  │  (memory/provenance.ts)                                          │  │
+│  │  MemoryProvenance + Confidence dual-track + serialization        │  │
+│  │  Auto-injected by handler, preserved by repair/promotion        │  │
 │  └──────────────────────────┬─────────────────────────────────────┘  │
 │                             │                                        │
 │  ┌──────────────────────────┴─────────────────────────────────────┐  │
@@ -362,8 +369,11 @@ opencode-memory/
 │   ├── audit-cli.ts      bun run audit
 │   ├── benchmark-cli.ts  bun run benchmark
 │   ├── quality-cli.ts    bun run quality (v0.3.1)
-│   └── repair-cli.ts    bun run repair (v0.3.3 — scan/list/approve/restore/clear + --scope + --include-recent-sessions)
-├── test/                 71 test files (721 tests; 0 regression)
+│   ├── repair-cli.ts    bun run repair (v0.3.3 — scan/list/approve/restore/clear + --scope + --include-recent-sessions)
+│   └── migrate-provenance.ts  bun run scripts/migrate-provenance.ts --dry-run|--apply|--rollback (v0.4.0)
+├── memory/               Provenance layer (v0.4.0)
+│   └── provenance.ts     MemoryProvenance, validation, serialization, merge
+├── test/                 80 test files (818 tests; 0 regression)
 ├── memory.config.example.json   Configuration template
 ├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config
