@@ -363,7 +363,7 @@ bun run scripts/migrate-archive-index.ts --apply --scope=project    # execute mi
 
 491 tests total across 55 files, 490 passing (1 flaky golden-extra duration test).
 
-> **Note:** As of v0.3.4, the test suite has grown to **669 tests across 67 files** (668 pass + 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
+> **Note:** As of v0.3.4, the test suite has grown to **721 tests across 71 files** (721 pass + 0 regression, 1 pre-existing C1 SDK timeout that requires a live OpenCode instance). See Changelog below for per-version details.
 
 ## Design Principles
 

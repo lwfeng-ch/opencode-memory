@@ -1,37 +1,38 @@
 /**
- * opencode-memory — Memory Quality Score (v0.3.1)
+ * opencode-memory — Memory Quality Score (v0.3.4 Phase 1)
  *
- * Aggregates 5 quality dimensions into a single QualityReport:
- *   Completeness (20%) — frontmatter field coverage
- *   Consistency (25%)  — duplicate detection
- *   Freshness (15%)    — age + recall tracking
- *   Noise (20%)        — placeholder/garbage/generic detection
- *   Retrievability (20%) — recall count distribution
+ * Lifecycle-aware quality evaluation:
+ *   Active Quality (5 dimensions) — only status=active files
+ *   Archive Hygiene (4 dimensions) — archived file integrity
+ *   Quality Gate Score — activeQuality × coverageRatio
  *
- * Re-exports QualityMemory type from quality.ts for convenience.
+ * Backward-compatible: overall field = gateScore
  */
 
 import type { QualityMemory } from "./quality.js"
+import type { QualityReportV2, ActiveQualityReport, ArchiveHygieneReport } from "./types.js"
 import {
   checkCompleteness,
   checkConsistency,
   checkFreshness,
   checkNoise,
   checkRetrievability,
+  checkArchiveIndexConsistency,
+  checkArchiveFrontmatter,
+  checkArchiveFileExists,
+  checkArchiveCorruption,
 } from "./quality.js"
 
-// Re-export QualityMemory so consumers can import from quality-score.ts
+// Re-export
 export type { QualityMemory } from "./quality.js"
 
 // ---------------------------------------------------------------------------
-// Types
+// Types (v2 extends v1 for backward compat)
 // ---------------------------------------------------------------------------
 
-/** Quality report with overall score and per-dimension breakdown. */
+/** @deprecated Use QualityReportV2 instead. Maintained for backward compat. */
 export interface QualityReport {
-  /** Overall quality score 0-100 (weighted average of dimensions) */
   overall: number
-  /** Per-dimension scores 0-100 */
   dimensions: {
     completeness: number
     consistency: number
@@ -41,9 +42,11 @@ export interface QualityReport {
   }
 }
 
+export type { QualityReportV2 }
+
 /** Interface for memory quality evaluators. */
 export interface MemoryQualityEvaluator {
-  evaluate(memories: QualityMemory[]): QualityReport
+  evaluate(memories: QualityMemory[]): QualityReportV2
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +61,13 @@ const WEIGHTS = {
   retrievability: 0.20,
 } as const
 
+const ARCHIVE_WEIGHTS = {
+  indexConsistency: 0.40,
+  frontmatter: 0.25,
+  fileExists: 0.20,
+  corruption: 0.15,
+} as const
+
 // ---------------------------------------------------------------------------
 // DefaultMemoryQualityEvaluator
 // ---------------------------------------------------------------------------
@@ -65,29 +75,76 @@ const WEIGHTS = {
 /**
  * Default implementation of MemoryQualityEvaluator.
  *
- * Computes 5 quality dimensions and aggregates them into a weighted
- * overall score. All dimension checks are pure functions from quality.ts.
+ * v0.3.4 Phase 1: Lifecycle-aware evaluation — partitions memories by
+ * status field, computes Active Quality (5 dims) and Archive Hygiene (4 dims)
+ * separately, then combines into a Quality Gate Score.
+ *
+ * Backward-compatible: `overall` field = gateScore.
  */
 export class DefaultMemoryQualityEvaluator implements MemoryQualityEvaluator {
-  evaluate(memories: QualityMemory[]): QualityReport {
+  evaluate(memories: QualityMemory[]): QualityReportV2 {
     const now = Date.now()
 
-    const dimensions = {
-      completeness: checkCompleteness(memories),
-      consistency: checkConsistency(memories),
-      freshness: checkFreshness(memories, now),
-      noise: checkNoise(memories),
-      retrievability: checkRetrievability(memories),
+    // Partition by lifecycle status
+    const active = memories.filter(m => !m.status || m.status === 'active')
+    const archived = memories.filter(m => m.status === 'archived')
+
+    // Active quality (5 dimensions)
+    const activeDims = {
+      completeness: checkCompleteness(active),
+      consistency: checkConsistency(active),
+      freshness: checkFreshness(active, now),
+      noise: checkNoise(active),
+      retrievability: checkRetrievability(active),
     }
 
-    const overall = Math.round(
-      dimensions.completeness * WEIGHTS.completeness +
-      dimensions.consistency * WEIGHTS.consistency +
-      dimensions.freshness * WEIGHTS.freshness +
-      dimensions.noise * WEIGHTS.noise +
-      dimensions.retrievability * WEIGHTS.retrievability,
+    const activeScore = Math.round(
+      activeDims.completeness * WEIGHTS.completeness +
+      activeDims.consistency * WEIGHTS.consistency +
+      activeDims.freshness * WEIGHTS.freshness +
+      activeDims.noise * WEIGHTS.noise +
+      activeDims.retrievability * WEIGHTS.retrievability,
     )
 
-    return { overall, dimensions }
+    const activeQuality: ActiveQualityReport = {
+      score: activeScore,
+      count: active.length,
+      dimensions: activeDims,
+    }
+
+    // Archive hygiene (4 dimensions)
+    const archiveDims = {
+      indexConsistency: checkArchiveIndexConsistency(archived),
+      frontmatter: checkArchiveFrontmatter(archived),
+      fileExists: checkArchiveFileExists(archived),
+      corruption: checkArchiveCorruption(archived),
+    }
+
+    const archiveScore = archived.length > 0
+      ? Math.round(
+          archiveDims.indexConsistency * ARCHIVE_WEIGHTS.indexConsistency +
+          archiveDims.frontmatter * ARCHIVE_WEIGHTS.frontmatter +
+          archiveDims.fileExists * ARCHIVE_WEIGHTS.fileExists +
+          archiveDims.corruption * ARCHIVE_WEIGHTS.corruption,
+        )
+      : 100
+
+    const archiveHygiene: ArchiveHygieneReport = {
+      score: archiveScore,
+      count: archived.length,
+      dimensions: archiveDims,
+    }
+
+    // Quality Gate Score
+    const total = active.length + archived.length
+    const coverageRatio = total > 0 ? active.length / total : 1
+    const gateScore = Math.round(activeScore * coverageRatio * 10) / 10
+
+    return {
+      activeQuality,
+      archiveHygiene,
+      gateScore,
+      overall: gateScore,
+    }
   }
 }

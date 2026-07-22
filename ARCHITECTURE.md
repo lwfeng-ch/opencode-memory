@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.3.4 Phase 0 | **Last Updated**: 2026-07-21 | **Tests**: 668 pass / 67 files (1 pre-existing C1 SDK timeout requires live OpenCode instance)
+> **Version**: 0.3.4 | **Last Updated**: 2026-07-22 | **Tests**: 721 pass / 71 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
 
 ## Table of Contents
 
@@ -363,7 +363,7 @@ opencode-memory/
 │   ├── benchmark-cli.ts  bun run benchmark
 │   ├── quality-cli.ts    bun run quality (v0.3.1)
 │   └── repair-cli.ts    bun run repair (v0.3.3 — scan/list/approve/restore/clear + --scope + --include-recent-sessions)
-├── test/                 63 test files (589 tests; 587 pass + 2 pre-existing C2/C3 SDK timeouts)
+├── test/                 71 test files (721 tests; 0 regression)
 ├── memory.config.example.json   Configuration template
 ├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config

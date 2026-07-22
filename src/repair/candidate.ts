@@ -68,3 +68,28 @@ export function assessRisk(confidence: string | undefined, daysSinceRecall: numb
   if (daysSinceRecall !== null && daysSinceRecall < 180) return "medium"
   return "high"
 }
+
+// ---------------------------------------------------------------------------
+// Merge Candidate (v0.3.4 Phase 2 — Similarity Scanner)
+// ---------------------------------------------------------------------------
+
+/** Reason for a merge candidate. */
+export type MergeReason = 'semantic_duplicate' | 'feedback_duplicate' | 'near_duplicate'
+
+/** Strategy for selecting which file to keep. */
+export type MergeKeepStrategy = 'longer_description' | 'higher_confidence' | 'newer'
+
+/** A candidate for merging two or more similar memories. */
+export interface MergeCandidate {
+  id: string
+  type: 'merge'
+  sourceFiles: string[]
+  targetFile: string
+  similarity: number
+  reason: MergeReason
+  confidence: 'high' | 'medium' | 'low'
+  mergeStrategy: {
+    keep: MergeKeepStrategy
+  }
+  scope: 'user' | 'project'
+}

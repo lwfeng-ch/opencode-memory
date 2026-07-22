@@ -42,7 +42,6 @@ import { logEvent } from "./telemetry.js"
 // ---------------------------------------------------------------------------
 
 const MS_PER_HOUR = 3_600_000
-const MS_PER_DAY = 86_400_000
 
 // ---------------------------------------------------------------------------
 // Lock path helper
@@ -224,12 +223,6 @@ function parseJsonResponse(response: unknown): unknown {
 // ---------------------------------------------------------------------------
 
 /** Extract a Date from a log file path like `logs/2026/07/2026-07-09.md`. */
-function parseLogDate(filename: string): Date | null {
-  const match = filename.match(/(\d{4}-\d{2}-\d{2})\.md$/)
-  if (!match) return null
-  const d = new Date(match[1] + "T00:00:00Z")
-  return isNaN(d.getTime()) ? null : d
-}
 
 // ---------------------------------------------------------------------------
 // Agent client shape (kept for backward compatibility — use RuntimeAdapter)
@@ -368,151 +361,6 @@ async function prepareDreamContext(
  * Scans the memory directory, reads the MEMORY.md index, and asks an agent
  * to analyze the current state. The agent identifies topics already covered,
  * gaps, stale files, and merge candidates.
- */
-async function orientPhase(
-  store: MemoryStore,
-  config: MemoryPluginConfig,
-  adapter: RuntimeAdapter,
-): Promise<unknown> {
-  const memories = await scanMemoryFiles(store)
-  const index = await store.getIndex()
-  const manifest = formatManifest(memories)
-
-  const prompt = [
-    `You are analyzing a memory directory for the opencode-memory consolidation pipeline.`,
-    ``,
-    `## Current State`,
-    `- Memory directory: ${store.getDir()}`,
-    `- Total memory files: ${memories.length}`,
-    ``,
-    `## MEMORY.md Index`,
-    index ?? "(no index yet — empty or uninitialized)",
-    ``,
-    `## File Manifest (headers)`,
-    manifest || "(no memory files)",
-    ``,
-    `## Task`,
-    `Analyze this state and identify:`,
-    `(a) Topics already covered in existing memories — list each unique topic`,
-    `(b) Gaps — topics that should be covered but are missing`,
-    `(c) Files that look stale, redundant, or could be merged with others`,
-    ``,
-    `Return your analysis as JSON:`,
-    `{`,
-    `  "topics": ["topic1", "topic2"],`,
-    `  "gaps": ["missing topic 1"],`,
-    `  "staleFiles": ["filename.md"],`,
-    `  "mergeCandidates": [["file1.md", "file2.md"]],`,
-    `  "notes": "any additional observations"`,
-    `}`,
-  ].join("\n")
-
-  const createOpts = resolveAgentConfig(config, "dream")
-  const session = await adapter.session.create(createOpts)
-  const response = await adapter.session.prompt(session.id, prompt)
-  return parseJsonResponse(response)
-}
-
-// ---------------------------------------------------------------------------
-// Phase 2 — Gather
-// ---------------------------------------------------------------------------
-
-/**
- * Phase 2 — Gather.
- *
- * Searches daily logs for recent activity and checks for drifted (outdated)
- * memories. Uses the orientation result for drift context.
- */
-async function gatherPhase(
-  store: MemoryStore,
-  config: MemoryPluginConfig,
-  adapter: RuntimeAdapter,
-  orientResult: unknown,
-): Promise<unknown> {
-  const memories = await store.list()
-
-  // Find log files from the last 7 days
-  const sevenDaysAgo = Date.now() - 7 * MS_PER_DAY
-  const recentLogs = memories.filter((m) => {
-    if (!m.filename.startsWith("logs/")) return false
-    const d = parseLogDate(m.filename)
-    return d !== null && d.getTime() >= sevenDaysAgo
-  })
-
-  // Read recent log contents
-  const logEntries: string[] = []
-  for (const log of recentLogs) {
-    try {
-      const content = await store.read(log.filename)
-      const preview = content.length > 2000 ? content.slice(0, 2000) + "\n...(truncated)" : content
-      logEntries.push(`--- ${log.filename} ---\n${preview}`)
-    } catch {
-      logEntries.push(`--- ${log.filename} ---\n(Unable to read)`)
-    }
-  }
-
-  // Build drift context: for each non-log, non-semantic memory
-  const driftContext = memories
-    .filter((m) => !m.filename.startsWith("logs/") && !m.filename.startsWith("semantic/"))
-    .map((m) => {
-      const desc = m.description ? `: ${m.description}` : ""
-      return `- ${m.filename}${desc} (last modified ${new Date(m.mtimeMs).toISOString()})`
-    })
-    .join("\n")
-
-  const prompt = [
-    `You are gathering information for memory consolidation.`,
-    ``,
-    `## Recent Daily Logs (last 7 days)`,
-    logEntries.length > 0
-      ? logEntries.join("\n\n")
-      : "(no recent log files found)",
-    ``,
-    `## Drift Check — Memory Descriptions`,
-    driftContext || "(no non-log memory files)",
-    ``,
-    `## Orientation Notes`,
-    JSON.stringify(orientResult, null, 2),
-    ``,
-    `## Task`,
-    `Analyze and identify:`,
-    `(a) Notable events, decisions, or discoveries from recent logs`,
-    `(b) Memories that appear to have drifted — claims that may be outdated`,
-    `   based on evidence in the recent logs`,
-    `(c) New information from the logs that should be captured as memories`,
-    ``,
-    `Return as JSON:`,
-    `{`,
-    `  "logsSummary": "concise summary of recent log activity",`,
-    `  "driftedMemories": ["filename.md: why it drifted"],`,
-    `  "newInfo": ["information worth capturing as a new memory"]`,
-    `}`,
-  ].join("\n")
-
-  const createOpts = resolveAgentConfig(config, "dream")
-  const session = await adapter.session.create(createOpts)
-  const response = await adapter.session.prompt(session.id, prompt)
-  return parseJsonResponse(response)
-}
-
-
-// ---------------------------------------------------------------------------
-// Phase 3 — Consolidate
-// ---------------------------------------------------------------------------
-
-/**
- * Phase 3 — Consolidate.
- *
- * Asks the agent to write and update memory files based on orientation and
- * gathered data. The agent returns a JSON payload specifying which files to
- * write (create or overwrite) and which to delete.
- *
- * Proposed changes are written to `semantic/staging/` (not directly to the
- * memory directory) with provenance frontmatter added. The promotion layer
- * validates and promotes them after all phases complete.
- *
- * Deletes are logged but not executed directly — they do not go through
- * staging (no confidence conflict applies to removals).
  */
 async function consolidatePhase(
   store: MemoryStore,

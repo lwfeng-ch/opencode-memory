@@ -68,18 +68,19 @@ describe("Quality score edge cases", () => {
     expect(score).toBe(50) // 2 out of 4 recalled
   })
 
-  test("overall score with all dimensions at 100 → overall = 100", () => {
+  test("overall score with all dimensions at 100 → gateScore = 100", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const memories = [makeMem()]
     const report = evaluator.evaluate(memories)
-    expect(report.overall).toBe(100)
+    expect(report.activeQuality.score).toBe(100)
+    expect(report.gateScore).toBe(100)
   })
 
-  test("overall score with all noise → overall < 50", () => {
+  test("overall score with all noise → activeQuality < 50", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const memories = [makeMem({ name: "Explicit Feedback", content: "TODO: fix", description: null, type: undefined, scope: undefined, confidence: undefined, recallCount: 0, lastRecalledAt: null })]
     const report = evaluator.evaluate(memories)
-    expect(report.overall).toBeLessThan(50)
+    expect(report.activeQuality.score).toBeLessThan(50)
   })
 
   test("large memory set — 50 memories with unique content", () => {
@@ -91,7 +92,7 @@ describe("Quality score edge cases", () => {
     }))
     const report = evaluator.evaluate(memories)
     // Each memory has unique "topicN" keyword, others shared → Jaccard < 0.8 → no merges
-    expect(report.dimensions.consistency).toBe(100)
-    expect(report.overall).toBe(100)
+    expect(report.activeQuality.dimensions.consistency).toBe(100)
+    expect(report.activeQuality.score).toBe(100)
   })
 })

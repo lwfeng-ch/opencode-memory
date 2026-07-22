@@ -65,16 +65,16 @@ export interface MemoryStore {
 
 export function parseFrontmatter(
   content: string,
-): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string } {
+): { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string; archived_at?: string } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
   const yaml = match[1]
-  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string } = {}
+  const result: { name?: string; description?: string; type?: string; scope?: string; confidence?: string; schema_version?: number; recall_count?: number; last_recalled_at?: string; status?: string; archived_at?: string } = {}
   for (const line of yaml.split(/\r?\n/)) {
     const kv = line.match(/^(\w+):\s*(.*)$/)
     if (!kv) continue
     const [, key, value] = kv
-    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence" || key === "last_recalled_at" || key === "status") {
+    if (key === "name" || key === "description" || key === "type" || key === "scope" || key === "confidence" || key === "last_recalled_at" || key === "status" || key === "archived_at") {
       (result as Record<string, unknown>)[key] = value.trim()
     } else if (key === "schema_version") {
       result.schema_version = parseInt(value.trim(), 10)

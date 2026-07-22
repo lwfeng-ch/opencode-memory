@@ -21,6 +21,18 @@ export class StalenessAnalyzer implements AuditAnalyzer {
     const findings: AuditFinding[] = []
 
     for (const mem of memories) {
+      // Archived files: emit ignored finding, skip all checks
+      if (mem.header.status === 'archived') {
+        findings.push({
+          severity: 'ignored',
+          category: 'staleness',
+          message: 'Archived memory excluded from active lifecycle',
+          files: [mem.filename],
+          lifecycleNote: 'Archived files are not expected to be recalled',
+        })
+        continue
+      }
+
       // Explicit memories are never stale
       if (mem.header.confidence === "explicit") continue
 

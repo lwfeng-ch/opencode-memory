@@ -11,7 +11,8 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { join, basename } from "node:path"
 import { parseFrontmatter, ENTRYPOINT_NAME } from "../src/store.js"
-import { DefaultMemoryQualityEvaluator, type QualityMemory } from "../src/evaluation/quality-score.js"
+import { DefaultMemoryQualityEvaluator } from "../src/evaluation/quality-score.js"
+import type { QualityReportV2, QualityMemory } from "../src/evaluation/quality-score.js"
 import { loadConfig } from "../src/config.js"
 import { getUserMemoryDir, getMemoryDir } from "../src/paths.js"
 
@@ -64,6 +65,8 @@ async function loadQualityMemories(dir: string): Promise<QualityMemory[]> {
           recallCount: fm.recall_count ?? 0,
           lastRecalledAt: fm.last_recalled_at ?? null,
           mtimeMs: stats.mtimeMs,
+          status: fm.status,
+          archivedAt: fm.archived_at ?? null,
         })
       } catch {
         // Skip unreadable files
@@ -75,17 +78,41 @@ async function loadQualityMemories(dir: string): Promise<QualityMemory[]> {
   return memories
 }
 
-function formatQualityConsole(report: ReturnType<DefaultMemoryQualityEvaluator["evaluate"]>): string {
+function formatQualityConsole(report: QualityReportV2): string {
   const lines: string[] = []
   lines.push("=== Memory Quality Report ===")
-  lines.push(`Overall: ${report.overall}/100`)
   lines.push("")
-  lines.push("Dimensions:")
-  lines.push(`  Completeness:   ${report.dimensions.completeness}/100`)
-  lines.push(`  Consistency:    ${report.dimensions.consistency}/100`)
-  lines.push(`  Freshness:      ${report.dimensions.freshness}/100`)
-  lines.push(`  Noise:          ${report.dimensions.noise}/100`)
-  lines.push(`  Retrievability: ${report.dimensions.retrievability}/100`)
+
+  // Active Quality
+  lines.push("Active Quality:")
+  lines.push(`  Score:        ${report.activeQuality.score}`)
+  lines.push(`  Files:        ${report.activeQuality.count}`)
+  lines.push(`  Completeness: ${report.activeQuality.dimensions.completeness}`)
+  lines.push(`  Consistency:  ${report.activeQuality.dimensions.consistency}`)
+  lines.push(`  Freshness:    ${report.activeQuality.dimensions.freshness}`)
+  lines.push(`  Noise:        ${report.activeQuality.dimensions.noise}`)
+  lines.push(`  Retrievability: ${report.activeQuality.dimensions.retrievability}`)
+  lines.push("")
+
+  // Archive Hygiene
+  lines.push("Archive Hygiene:")
+  lines.push(`  Score:            ${report.archiveHygiene.score}`)
+  lines.push(`  Files:            ${report.archiveHygiene.count}`)
+  lines.push(`  Index Consistency: ${report.archiveHygiene.dimensions.indexConsistency}`)
+  lines.push(`  Frontmatter:      ${report.archiveHygiene.dimensions.frontmatter}`)
+  lines.push(`  File Exists:      ${report.archiveHygiene.dimensions.fileExists}`)
+  lines.push(`  Corruption:       ${report.archiveHygiene.dimensions.corruption}`)
+  lines.push("")
+
+  // Gate Score
+  const total = report.activeQuality.count + report.archiveHygiene.count
+  const coverage = total > 0 ? ((report.activeQuality.count / total) * 100).toFixed(1) : "100.0"
+  lines.push("Quality Gate:")
+  lines.push(`  Score:    ${report.gateScore}`)
+  lines.push(`  Coverage: ${coverage}%`)
+  lines.push("")
+  lines.push(`[deprecated] Operational Score: ${report.overall}`)
+
   return lines.join("\n")
 }
 

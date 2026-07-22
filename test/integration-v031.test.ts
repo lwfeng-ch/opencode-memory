@@ -11,7 +11,7 @@ import { loadDataset } from "../benchmark/dataset.js"
 import { GoldenExecutor, type GoldenCase } from "../benchmark/executor/golden.js"
 import { DefaultMemoryComparator, type ComparableMemory } from "../src/evaluation/comparison.js"
 import { generateBenchmarkReport } from "../benchmark/reporter.js"
-import { DefaultMemoryQualityEvaluator, type QualityMemory } from "../src/evaluation/quality-score.js"
+import { DefaultMemoryQualityEvaluator, type QualityReportV2, type QualityMemory } from "../src/evaluation/quality-score.js"
 import { join } from "node:path"
 
 const dataDir = join(process.cwd(), "benchmark", "data")
@@ -94,19 +94,19 @@ describe("v0.3.1 Integration — Golden benchmark end-to-end", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const report = evaluator.evaluate(memories)
 
-    // One clean + one garbage → overall < 70
-    expect(report.overall).toBeLessThan(70)
+    // One clean + one garbage → activeQuality < 70
+    expect(report.activeQuality.score).toBeLessThan(70)
     // Completeness should be 50 (one complete, one not)
-    expect(report.dimensions.completeness).toBe(50)
+    expect(report.activeQuality.dimensions.completeness).toBe(50)
     // Noise should be 50 (one clean, one noisy)
-    expect(report.dimensions.noise).toBe(50)
+    expect(report.activeQuality.dimensions.noise).toBe(50)
   })
 
-  test("quality evaluator on empty store → overall = 100", () => {
+  test("quality evaluator on empty store → activeQuality = 100", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const report = evaluator.evaluate([])
-    expect(report.overall).toBe(100)
-    expect(report.dimensions.completeness).toBe(100)
+    expect(report.activeQuality.score).toBe(100)
+    expect(report.activeQuality.dimensions.completeness).toBe(100)
   })
 
   test("golden executor with adversarial runtime — low scores", async () => {

@@ -31,11 +31,13 @@ export interface AuditedMemory {
 }
 
 export interface AuditFinding {
-  severity: "critical" | "warning" | "info"
+  severity: "critical" | "warning" | "info" | "ignored"
   category: string            // "duplicate" | "conflict" | "quality" | "staleness"
   message: string
   files: string[]             // affected filenames
   suggestion?: string          // recommended action (not auto-executed)
+  /** @since v0.3.4 — reason for lifecycle-based severity change */
+  lifecycleNote?: string
 }
 
 export interface AuditReport {
@@ -44,11 +46,20 @@ export interface AuditReport {
   scope: "user" | "project" | "all"
   summary: {
     total_memories: number
-    total_findings: number
+    total_findings: number     // excludes ignored
     score: number              // 0-100
-    by_severity: { critical: number; warning: number; info: number }
+    by_severity: { critical: number; warning: number; info: number; ignored: number }
   }
   findings: AuditFinding[]
+  /** @since v0.3.4 — lifecycle breakdown */
+  lifecycleSummary?: {
+    active: number
+    archived: number
+  }
+  /** @since v0.3.4.1 — findings affecting active score */
+  active_findings?: number
+  /** @since v0.3.4.1 — lifecycle-excluded findings (ignored) */
+  lifecycle_excluded?: number
 }
 
 export interface AuditAnalyzer {
@@ -110,6 +121,7 @@ export class MemoryAuditService {
               schemaVersion: fm.schema_version,
               recallCount: fm.recall_count ?? 0,
               lastRecalledAt: fm.last_recalled_at ?? null,
+              status: fm.status as MemoryHeader["status"],
             },
             mtimeMs: stats.mtimeMs,
             scope,
@@ -129,26 +141,37 @@ export class MemoryAuditService {
     findings: AuditFinding[],
     scope: "user" | "project" | "all",
   ): AuditReport {
-    const bySeverity = { critical: 0, warning: 0, info: 0 }
+    const bySeverity = { critical: 0, warning: 0, info: 0, ignored: 0 }
     for (const f of findings) bySeverity[f.severity]++
 
     const penalty = bySeverity.critical * 15 + bySeverity.warning * 5 + bySeverity.info * 1
     const score = Math.max(0, Math.min(100, 100 - penalty))
 
-    const severityOrder = { critical: 0, warning: 1, info: 2 }
-    findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+    const severityOrder: Record<string, number> = { critical: 0, warning: 1, info: 2, ignored: 3 }
+    findings.sort((a, b) => (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99))
+
+    const activeCount = memories.filter(m => !m.header.status || m.header.status === 'active').length
+    const archivedCount = memories.filter(m => m.header.status === 'archived').length
+    const activeFindings = findings.filter(f => f.severity !== 'ignored').length
+    const ignoredFindings = bySeverity.ignored
 
     return {
-      version: "0.3.0",
+      version: "0.3.4",
       timestamp: new Date().toISOString(),
       scope,
       summary: {
         total_memories: memories.length,
-        total_findings: findings.length,
+        total_findings: activeFindings,
         score,
         by_severity: bySeverity,
       },
       findings,
+      lifecycleSummary: {
+        active: activeCount,
+        archived: archivedCount,
+      },
+      active_findings: activeFindings,
+      lifecycle_excluded: ignoredFindings,
     }
   }
 }

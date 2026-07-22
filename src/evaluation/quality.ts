@@ -30,6 +30,10 @@ export interface QualityMemory {
   recallCount: number
   lastRecalledAt: string | null
   mtimeMs: number
+  /** @since v0.3.4 — lifecycle status from frontmatter */
+  status?: string
+  /** @since v0.3.4 — timestamp when archived */
+  archivedAt?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -248,4 +252,84 @@ export function checkRetrievability(memories: QualityMemory[]): number {
     if (m.recallCount > 0) recalled++
   }
   return Math.round((recalled / memories.length) * 100)
+}
+
+// ---------------------------------------------------------------------------
+// Archive Hygiene Dimensions (v0.3.4 Phase 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check index consistency: archived files have proper status field.
+ * -15 per file where status !== "archived".
+ * Returns 0-100 score.
+ */
+export function checkArchiveIndexConsistency(archivedMemories: QualityMemory[]): number {
+  if (archivedMemories.length === 0) return 100
+  let totalDeduction = 0
+  for (const m of archivedMemories) {
+    if (!m.status || m.status !== 'archived') {
+      totalDeduction += 15
+    }
+  }
+  const maxPenalty = archivedMemories.length * 30
+  const score = Math.max(0, Math.round(100 - (totalDeduction / maxPenalty) * 100))
+  return score
+}
+
+/**
+ * Check frontmatter completeness of archived files.
+ * -40 if missing status: archived, -20 if missing archivedAt, -15 per missing name/description.
+ * Returns 0-100 score.
+ */
+export function checkArchiveFrontmatter(archivedMemories: QualityMemory[]): number {
+  if (archivedMemories.length === 0) return 100
+  let totalDeduction = 0
+  for (const m of archivedMemories) {
+    if (!m.status || m.status !== 'archived') {
+      totalDeduction += 40
+    }
+    if (!m.archivedAt) {
+      totalDeduction += 20
+    }
+    if (!m.name || m.name.trim().length === 0) {
+      totalDeduction += 15
+    }
+    if (!m.description || m.description.trim().length === 0) {
+      totalDeduction += 15
+    }
+  }
+  const maxPenalty = archivedMemories.length * 90
+  const score = Math.max(0, Math.round(100 - (totalDeduction / maxPenalty) * 100))
+  return score
+}
+
+/**
+ * Check file existence — assumes all entries in the list exist.
+ * The caller (DefaultMemoryQualityEvaluator) is responsible for
+ * filtering out non-existent files before passing them in.
+ * Returns 100 (always passes at evaluation layer).
+ */
+export function checkArchiveFileExists(_archivedMemories: QualityMemory[]): number {
+  return 100
+}
+
+/**
+ * Check corruption: frontmatter parseability and content integrity.
+ * -40 per empty body, -20 per suspiciously short content.
+ * Returns 0-100 score.
+ */
+export function checkArchiveCorruption(archivedMemories: QualityMemory[]): number {
+  if (archivedMemories.length === 0) return 100
+  let totalDeduction = 0
+  for (const m of archivedMemories) {
+    const bodyContent = m.content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim()
+    if (bodyContent.length === 0) {
+      totalDeduction += 40
+    } else if (bodyContent.length < 20) {
+      totalDeduction += 20
+    }
+  }
+  const maxPenalty = archivedMemories.length * 50
+  const score = Math.max(0, Math.round(100 - (totalDeduction / maxPenalty) * 100))
+  return score
 }

@@ -22,6 +22,8 @@ import { logEvent } from "./telemetry.js";
 // Re-export scoreMemory from evaluation layer (extracted in v0.3.0)
 export { scoreMemory, scoreMemories } from "./evaluation/scoring.js"
 import { scoreMemory } from "./evaluation/scoring.js";
+// v0.3.4 Phase 3: Query-Driven Historical Recall
+import { isHistoricalQuery, archivedScoreMultiplier } from "./recall/query-analyzer.js";
 
 // ---------------------------------------------------------------------------
 // Exported types
@@ -554,6 +556,11 @@ export async function recallMemoriesMultiScope(
     scanMemoryFiles(projectStore),
   ]);
 
+  // v0.3.4 Phase 3: Query-Driven Historical Recall
+  // If the query contains historical keywords (以前/之前/上次/previously/etc.),
+  // include archived memories with a reduced score multiplier.
+  const historicalMode = isHistoricalQuery(query)
+
   const userScored = scoreHeaders(query, userHeaders).filter(
     (s) => !isTransientToolMemory(s.header, recentTools),
   );
@@ -561,15 +568,30 @@ export async function recallMemoriesMultiScope(
     (s) => !isTransientToolMemory(s.header, recentTools),
   );
 
+  // If historical query, also include archived memories with reduced scores
+  let userArchived: Array<{ header: MemoryHeader; score: number }> = []
+  let projectArchived: Array<{ header: MemoryHeader; score: number }> = []
+  if (historicalMode) {
+    const multiplier = archivedScoreMultiplier('active+archived')
+    userArchived = scoreHeaders(query, userHeaders.filter(h => h.status === 'archived'))
+      .map(s => ({ ...s, score: Math.round(s.score * multiplier) }))
+      .filter(s => s.score > 0)
+    projectArchived = scoreHeaders(query, projectHeaders.filter(h => h.status === 'archived'))
+      .map(s => ({ ...s, score: Math.round(s.score * multiplier) }))
+      .filter(s => s.score > 0)
+  }
+
   // Take top N/2 from each store (minimum 5 per store)
   const perStore = Math.max(5, Math.floor(config.recall.maxCandidates / 2));
 
-  const userCandidates: ScoredCandidate[] = userScored
-    .slice(0, perStore)
-    .map((c) => ({ ...c, source: "user" }));
-  const projectCandidates: ScoredCandidate[] = projectScored
-    .slice(0, perStore)
-    .map((c) => ({ ...c, source: "project" }));
+  const userCandidates: ScoredCandidate[] = [
+    ...userScored.slice(0, perStore).map((c) => ({ ...c, source: "user" as const })),
+    ...userArchived.slice(0, Math.max(2, Math.floor(perStore / 4))).map((c) => ({ ...c, source: "user" as const })),
+  ];
+  const projectCandidates: ScoredCandidate[] = [
+    ...projectScored.slice(0, perStore).map((c) => ({ ...c, source: "project" as const })),
+    ...projectArchived.slice(0, Math.max(2, Math.floor(perStore / 4))).map((c) => ({ ...c, source: "project" as const })),
+  ];
 
   // Merge with dedup by filename
   // Priority: projectOverridesUser → project wins; otherwise → user wins (kept first)

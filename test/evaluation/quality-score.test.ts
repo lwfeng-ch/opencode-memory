@@ -13,7 +13,7 @@ import { describe, test, expect } from "vitest"
 import {
   DefaultMemoryQualityEvaluator,
   type QualityMemory,
-  type QualityReport,
+  type QualityReportV2,
   type MemoryQualityEvaluator,
 } from "../../src/evaluation/quality-score.js"
 import {
@@ -51,24 +51,28 @@ const DAY = 24 * 60 * 60 * 1000
 // QualityReport structure
 // ---------------------------------------------------------------------------
 
-describe("QualityReport structure", () => {
-  test("evaluate returns QualityReport with overall + 5 dimensions", () => {
+describe("QualityReport structure (v0.3.4 lifecycle-aware)", () => {
+  test("evaluate returns QualityReportV2 with activeQuality + archiveHygiene + gateScore", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const report = evaluator.evaluate([makeMemory()])
+    expect(report).toHaveProperty("activeQuality")
+    expect(report).toHaveProperty("archiveHygiene")
+    expect(report).toHaveProperty("gateScore")
     expect(report).toHaveProperty("overall")
-    expect(report).toHaveProperty("dimensions")
-    expect(report.dimensions).toHaveProperty("completeness")
-    expect(report.dimensions).toHaveProperty("consistency")
-    expect(report.dimensions).toHaveProperty("freshness")
-    expect(report.dimensions).toHaveProperty("noise")
-    expect(report.dimensions).toHaveProperty("retrievability")
+    expect(report.activeQuality).toHaveProperty("dimensions")
+    expect(report.activeQuality.dimensions).toHaveProperty("completeness")
+    expect(report.activeQuality.dimensions).toHaveProperty("consistency")
+    expect(report.activeQuality.dimensions).toHaveProperty("freshness")
+    expect(report.activeQuality.dimensions).toHaveProperty("noise")
+    expect(report.activeQuality.dimensions).toHaveProperty("retrievability")
     expect(typeof report.overall).toBe("number")
   })
 
-  test("empty memory list returns overall=100 (no issues)", () => {
+  test("empty memory list returns activeQuality=100, gateScore=100 (empty = perfect coverage)", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const report = evaluator.evaluate([])
-    expect(report.overall).toBe(100)
+    expect(report.activeQuality.score).toBe(100)
+    expect(report.gateScore).toBe(100)
   })
 })
 
@@ -193,17 +197,17 @@ describe("Retrievability dimension", () => {
 // Overall weighted score
 // ---------------------------------------------------------------------------
 
-describe("Overall score aggregation", () => {
-  test("overall is weighted average of 5 dimensions", () => {
+describe("Overall score aggregation (v0.3.4)", () => {
+  test("activeQuality.score is weighted average of 5 dimensions", () => {
     const evaluator = new DefaultMemoryQualityEvaluator()
     const report = evaluator.evaluate([makeMemory()])
     const expected = Math.round(
-      report.dimensions.completeness * 0.20 +
-      report.dimensions.consistency * 0.25 +
-      report.dimensions.freshness * 0.15 +
-      report.dimensions.noise * 0.20 +
-      report.dimensions.retrievability * 0.20
+      report.activeQuality.dimensions.completeness * 0.20 +
+      report.activeQuality.dimensions.consistency * 0.25 +
+      report.activeQuality.dimensions.freshness * 0.15 +
+      report.activeQuality.dimensions.noise * 0.20 +
+      report.activeQuality.dimensions.retrievability * 0.20
     )
-    expect(report.overall).toBe(expected)
+    expect(report.activeQuality.score).toBe(expected)
   })
 })
