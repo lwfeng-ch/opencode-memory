@@ -223,7 +223,7 @@ export class ConflictGraphBuilder {
       existing.edges.push(edge)
     }
 
-    return Array.from(componentMap.entries()).map(([root, data]) => ({
+    return Array.from(componentMap.entries()).map(([, data]) => ({
       id: generateComponentId(),
       memories: Array.from(data.memories).sort(),
       edges: data.edges,

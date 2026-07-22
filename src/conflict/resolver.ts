@@ -152,6 +152,7 @@ export function proposalToFinding(
   return {
     id: `conflict_${Date.now().toString(36)}`,
     filename: proposal.affectedMemories[0],
+    category: "contradiction" as const,
     severity: "warning",
     worthinessScore: 0,
     reasons: [

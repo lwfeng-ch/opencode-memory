@@ -100,12 +100,27 @@ export function recommendationForScore(
 }
 
 // ---------------------------------------------------------------------------
+// FindingCategory (v0.4.3)
+// ---------------------------------------------------------------------------
+
+export type FindingCategory =
+  | "quality"
+  | "lifecycle"
+  | "provenance"
+  | "duplicate"
+  | "contradiction"
+  | "superseded"
+  | "feedback"
+  | "retrieval"
+
+// ---------------------------------------------------------------------------
 // ValidationFinding
 // ---------------------------------------------------------------------------
 
 export interface ValidationFinding {
   id: string
   filename: string
+  category: FindingCategory
   severity: "critical" | "warning" | "info"
   worthinessScore: number
   reasons: Array<{
@@ -170,6 +185,7 @@ export function createFinding(
   return {
     id: `finding_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     filename: report.filename,
+    category: "quality",
     severity,
     worthinessScore: report.worthinessScore,
     reasons,
