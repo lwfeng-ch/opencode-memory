@@ -240,6 +240,21 @@ export interface MemoryPluginConfig {
     memoryPressure: number
   }
 
+  /**
+   * Governance configuration — autonomous governance cycle (v0.5.3).
+   * All default to false/0 — opt-in only.
+   */
+  governance: {
+    /** Enable/disable autonomous governance. Default false (opt-in). */
+    enabled: boolean
+    /** Auto-execute low-risk candidates. Default false (review-only). */
+    autoExecute: boolean
+    /** Max candidates to auto-execute per run. Default 5. */
+    maxAutoPerRun: number
+    /** Min hours between governance runs. Default 24. */
+    minHoursBetweenRuns: number
+  }
+
   /** Staleness warnings — pure computation, no model. */
   staleness: {
     /** Days before a memory gets a staleness caveat. 0 = always warn. */
@@ -430,6 +445,14 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
     recall: { agent: "explore" },
   },
 
+  // v0.5.3: Autonomous governance — opt-in only, all default false
+  governance: {
+    enabled: false,
+    autoExecute: false,
+    maxAutoPerRun: 5,
+    minHoursBetweenRuns: 24,
+  },
+
   // v0.3.4+: experimental features, all default false
   experimental: {
     archiveIndex: false,
@@ -460,6 +483,7 @@ export function resolveConfig(
         recall: { ...DEFAULT_CONFIG.agents.recall },
       },
       experimental: { ...DEFAULT_CONFIG.experimental },
+      governance: { ...DEFAULT_CONFIG.governance },
     }
   }
   return {
@@ -531,6 +555,12 @@ interface ConfigFile {
       user_scope_enabled?: boolean
       project_overrides_user?: boolean
     }
+    governance?: {
+      enabled?: boolean
+      auto_execute?: boolean
+      max_auto_per_run?: number
+      min_hours_between_runs?: number
+    }
   }
   models?: {
     recall?: string | null
@@ -566,6 +596,13 @@ interface ConfigFile {
     extraction?: { agent?: string; model?: string; category?: string }
     dream?: { agent?: string; model?: string; category?: string }
     recall?: { agent?: string; model?: string; category?: string }
+  }
+  /** v0.5.3: Autonomous governance — opt-in only */
+  governance?: {
+    enabled?: boolean
+    auto_execute?: boolean
+    max_auto_per_run?: number
+    min_hours_between_runs?: number
   }
   /** v0.3.4+ experimental features — opt-in only, default false */
   experimental?: {
@@ -690,6 +727,13 @@ export async function loadConfig(
 
       experimental: {
         archiveIndex: file.experimental?.archive_index ?? DEFAULT_CONFIG.experimental!.archiveIndex,
+      },
+
+      governance: {
+        enabled: file.features?.governance?.enabled ?? DEFAULT_CONFIG.governance.enabled,
+        autoExecute: file.features?.governance?.auto_execute ?? DEFAULT_CONFIG.governance.autoExecute,
+        maxAutoPerRun: file.features?.governance?.max_auto_per_run ?? DEFAULT_CONFIG.governance.maxAutoPerRun,
+        minHoursBetweenRuns: file.features?.governance?.min_hours_between_runs ?? DEFAULT_CONFIG.governance.minHoursBetweenRuns,
       },
     }
   } catch {

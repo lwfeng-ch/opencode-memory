@@ -63,6 +63,13 @@ export interface PipelineState {
     total_size: number
     last_check: string
   }
+  /** v0.5.3: Autonomous governance cycle tracking */
+  governance: {
+    last_run_at: string | null
+    total_actions: number
+    total_success: number
+    total_failed: number
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +120,12 @@ export const DEFAULT_STATE: PipelineState = {
     total_size: 0,
     last_check: "",
   },
+  governance: {
+    last_run_at: null,
+    total_actions: 0,
+    total_success: 0,
+    total_failed: 0,
+  },
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +155,7 @@ export function mergeState(parsed: Partial<PipelineState>): PipelineState {
     recall: { ...d.recall, ...parsed.recall },
     events_received: parsed.events_received ?? d.events_received,
     memory_pressure: { ...d.memory_pressure, ...parsed.memory_pressure },
+    governance: { ...d.governance, ...parsed.governance },
   }
 }
 
