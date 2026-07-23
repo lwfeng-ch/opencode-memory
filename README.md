@@ -489,6 +489,35 @@ MIT
 **Test growth:** 818 â†?916 (+98), 88 files, 0 regression
 **TypeScript:** `tsc --noEmit` clean
 
+### v0.5.0 ¡ª Discovery Engine (2026-07-23)
+
+**Three-level MemoryCluster system**
+- ConflictClusterAdapter ¡ª adapts v0.4.2 ConflictGraph components into MemoryCluster objects (no re-detection)
+- ClaimClusterBuilder ¡ª groups memories by exact (subject, predicate) pairs via ClaimExtractor
+- TopicClusterBuilder ¡ª TF-IDF + Jaccard similarity clustering with BFS connected components (threshold 0.3)
+
+**Evidence Analyzer**
+- EvidenceCollector ¡ª aggregates governance signals (worthiness, confidence, temporal) per cluster member
+- ClusterScoreEngine ¡ª scores compatibility, dominance, and redundancy within clusters
+- Automatic dominant member detection (gap >= 0.3 in average score)
+
+**Rule-based Candidate Generator**
+- Non-LLM rule engine: 5 rules for conflict clusters (archive/keep/split)
+- ConsolidationCandidate ¡ª typed candidates with action, targets, evidence, expectedGain, riskHint, confidence
+- Candidates sorted by confidence descending
+
+**DreamRunner Pipeline**
+- DreamRunner ¡ª orchestrates full Cluster ¡ú Evidence ¡ú Candidate ¡ú Proposal pipeline
+- ClusterBuilder ¡ª combines all 3 levels in a single call
+- ProposalMapper ¡ª translates ConsolidationCandidate to RepairCandidate for RepairQueue
+
+**Architecture boundary: Discovery only, no execution**
+- All outputs are proposals ¡ª never modifies memory
+- LLM only explains, never decides
+- DreamMode (classic/v0.5/hybrid) for backward compatibility
+
+**Test growth:** 1006 ¡ú 1118 (+112), 102 files, 0 regression
+**TypeScript:** 	sc --noEmit clean (0 errors)
 ### v0.4.3 ¡ª Recall Feedback Foundation (2026-07-22)
 
 **RecallEvent & UserFeedback**
@@ -723,4 +752,5 @@ MIT
 
 - KAIROS extraction, two-stage recall, Dream consolidation, telemetry, memory pressure
 - 139 tests across 18 files
+
 

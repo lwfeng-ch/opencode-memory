@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> **Version**: 0.4.3 | **Last Updated**: 2026-07-22 | **Tests**: 1006 pass / 97 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
+> **Version**: 0.5.0 | **Last Updated**: 2026-07-23 | **Tests**: 1118 pass / 102 files (0 regressions, 1 pre-existing C1 SDK timeout requires live OpenCode instance)
 
 ## Table of Contents
 
@@ -388,7 +388,7 @@ opencode-memory/
 �?  └── dimensions/
 �?      ├── provenance.ts ProvenanceValidator (sourceTrust, extractionConfidence, historyIntegrity, claimCalibration)
 �?      └── lifecycle.ts  LifecycleValidator (statusAppropriateness, stability)
-├── test/                 97 test files (1006 tests; 0 regression)
+├── test/                 102 test files (1118 tests; 0 regression)
 ├── memory.config.example.json   Configuration template
 ├── package.json          3 deps: @opencode-ai/plugin, zod, vitest (dev)
 └── tsconfig.json         TypeScript config
@@ -882,5 +882,7 @@ bun test test/integration-v031.test.ts     # 7 tests �?v0.3.1 Integration
 5. **C1 integration test timing** �?The "MemoryPlugin loads" test intermittently times out due to adapter self-check timing. Pre-existing, not caused by optimizations.
 
 6. **Pre-existing tsc errors** �?Missing `@types/node` causes TypeScript errors in Bun projects. Not caused by optimization changes. Runtime works correctly via Bun's native TS resolution.
+
+
 
 
