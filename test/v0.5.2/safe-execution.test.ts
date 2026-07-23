@@ -19,7 +19,7 @@ describe("SafeExecutionService", () => {
     // Use a temp dir via memoryDir
     const snapshotManager = new SnapshotManager("/tmp/safe-exec-test")
     const riskEngine = new RiskEngine()
-    const service = new SafeExecutionService(repairService as any, snapshotManager, riskEngine)
+    const service = new SafeExecutionService(repairService as any, snapshotManager, riskEngine, "/tmp/safe-exec-test")
     return { service, repairService, snapshotManager }
   }
 
@@ -47,9 +47,9 @@ describe("SafeExecutionService", () => {
     expect(result.status).toBe("committed")
   })
 
-  it("3. execute restore → calls repairService.restore", async () => {
+  it("3. execute by action string routes correctly", async () => {
     const { service, repairService } = makeService()
-    vi.spyOn(repairService, "restore").mockResolvedValue(undefined)
+    vi.spyOn(repairService, "archive").mockResolvedValue(undefined)
     const result = await service.execute(makeCandidate({ action: "archive" }))
     expect(result.status).toBe("committed")
   })

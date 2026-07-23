@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path"
-import { readFile, writeFile } from "node:fs/promises"
+import { readFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import type { RepairService } from "../repair/service.js"
 import type { RepairCandidate } from "../repair/candidate.js"
@@ -19,8 +19,6 @@ import {
   generateTransactionId,
   type RiskAssessment,
   type TransactionContext,
-  type TransactionSnapshot,
-  type TransactionStatus,
 } from "./types.js"
 
 export class SafeExecutionService {
@@ -28,6 +26,7 @@ export class SafeExecutionService {
     private repairService: RepairService,
     private snapshotManager: SnapshotManager,
     private riskEngine: RiskEngine,
+    private memoryDir: string,
   ) {}
 
   /**
@@ -48,12 +47,16 @@ export class SafeExecutionService {
   }
 
   /**
-   * Rollback a transaction by restoring from snapshot.
+   * Rollback a transaction by snapshot ID.
+   * Looks up the transaction metadata from .tx.json, then restores the snapshot.
+   * Throws if the transaction is not found or already rolled back.
    */
-  async rollback(transactionId: string): Promise<void> {
-    // Transaction log is stored alongside snapshots
-    // For now, lookup is simple: we store tx context as metadata
-    throw new Error(`Rollback for ${transactionId} requires the original TransactionContext`)
+  async rollback(transactionId: string): Promise<TransactionContext> {
+    const tx = await this.snapshotManager.getTransaction(transactionId)
+    if (!tx) {
+      throw new Error(`Transaction not found: ${transactionId}`)
+    }
+    return this.rollbackTransaction(tx)
   }
 
   /**
@@ -61,14 +64,12 @@ export class SafeExecutionService {
    */
   async rollbackTransaction(tx: TransactionContext): Promise<TransactionContext> {
     if (tx.status === "rolled_back") {
-      return tx // already rolled back
+      return tx
     }
 
     try {
-      const content = await this.snapshotManager.readContent(tx.snapshot)
-      // Write the original content back
-      await writeFile(tx.snapshot.filename, content, "utf-8")
-
+      const targetPath = join(this.memoryDir, tx.snapshot.filename)
+      await this.snapshotManager.restoreToFile(tx.snapshot, targetPath)
       tx.status = "rolled_back"
       tx.rolledBackAt = Date.now()
       return tx
@@ -80,20 +81,10 @@ export class SafeExecutionService {
   }
 
   /**
-   * Get all transactions (snapshots).
+   * Get all transactions with full metadata.
    */
-  async getTransactions(): Promise<TransactionSnapshot[]> {
-    const files = await this.snapshotManager.list()
-    // Return snapshot metadata as transaction records
-    return files.map((f) => ({
-      id: f,
-      timestamp: 0,
-      operation: "archive" as const,
-      filename: f,
-      backupPath: f,
-      originalContent: "",
-      checksum: "",
-    }))
+  async getTransactions(): Promise<TransactionContext[]> {
+    return this.snapshotManager.listTransactions()
   }
 
   // ---------------------------------------------------------------------------
@@ -107,20 +98,18 @@ export class SafeExecutionService {
     candidateId?: string,
   ): Promise<TransactionContext> {
     const txId = generateTransactionId()
-    let status: TransactionStatus = "pending"
-    let error: string | undefined
-    let snapshot: TransactionSnapshot | undefined
+    let tx: TransactionContext
 
     try {
       // 1. Snapshot: read current file content
-      const filepath = join(this.getMemoryDir(), source)
+      const filepath = join(this.memoryDir, source)
       let content = ""
       if (existsSync(filepath)) {
         content = await readFile(filepath, "utf-8")
       }
 
-      // 2. Create snapshot
-      snapshot = await this.snapshotManager.create(source, content)
+      // 2. Create snapshot with risk metadata
+      tx = await this.snapshotManager.create(source, content, riskAssessment, candidateId)
 
       // 3. Execute the operation via RepairService
       if (action === "archive") {
@@ -128,48 +117,42 @@ export class SafeExecutionService {
       } else if (action === "delete") {
         await this.repairService.delete(source, `safe-execution: ${txId}`, candidateId)
       } else {
-        // restore or other — delegate to RepairService
         await this.repairService.restore(source, `safe-execution: ${txId}`)
       }
 
       // 4. Commit
-      status = "committed"
+      tx.status = "committed"
+      tx.committedAt = Date.now()
+      return tx
     } catch (err) {
-      status = "failed"
-      error = err instanceof Error ? err.message : String(err)
-
       // Attempt rollback if snapshot was created
-      if (snapshot) {
+      if (tx!) {
         try {
-          await this.snapshotManager.restoreToFile(snapshot, join(this.getMemoryDir(), source))
-          status = "rolled_back"
+          const targetPath = join(this.memoryDir, source)
+          await this.snapshotManager.restoreToFile(tx!.snapshot, targetPath)
+          tx!.status = "rolled_back"
+          tx!.rolledBackAt = Date.now()
+          return tx!
         } catch {
           // rollback failed — transaction is in failed state
         }
       }
-    }
 
-    return {
-      snapshot: snapshot ?? {
-        id: txId,
-        timestamp: Date.now(),
-        operation: action as "archive" | "delete" | "restore",
-        filename: source,
-        backupPath: "",
-        originalContent: "",
-        checksum: "",
-      },
-      riskAssessment,
-      candidateId,
-      status,
-      committedAt: status === "committed" ? Date.now() : undefined,
-      rolledBackAt: status === "rolled_back" ? Date.now() : undefined,
-      error,
+      return {
+        snapshot: {
+          id: txId,
+          timestamp: Date.now(),
+          operation: action as "archive" | "delete" | "restore",
+          filename: source,
+          backupPath: "",
+          originalContent: "",
+          checksum: "",
+        },
+        riskAssessment,
+        candidateId,
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      }
     }
-  }
-
-  private getMemoryDir(): string {
-    // Infer memory dir from repair service — it's constructed with one
-    return ""
   }
 }

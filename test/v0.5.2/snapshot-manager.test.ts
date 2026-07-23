@@ -1,13 +1,13 @@
 /**
  * v0.5.2 — SnapshotManager Tests
- * 6 tests: create/restore/cleanup/list/missing/overwrite
+ * 6 tests: create/restore/cleanup/list/missing/getTransaction
  */
 
 import { describe, it, expect } from "vitest"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs"
+import { mkdtempSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
-import { mkdir, writeFile, rm } from "node:fs/promises"
+import { rm } from "node:fs/promises"
 import { SnapshotManager } from "../../src/safe-execution/snapshot.js"
 
 describe("SnapshotManager", () => {
@@ -20,29 +20,30 @@ describe("SnapshotManager", () => {
     }
   }
 
-  it("1. create snapshot", async () => {
+  it("1. create snapshot returns TransactionContext", async () => {
     await withTempDir(async (dir, mgr) => {
-      const snap = await mgr.create("test.md", "hello world")
-      expect(snap.filename).toBe("test.md")
-      expect(snap.originalContent).toBe("hello world")
-      expect(snap.checksum).toBeTruthy()
-      expect(snap.id).toMatch(/^snap_/)
+      const tx = await mgr.create("test.md", "hello world")
+      expect(tx.snapshot.filename).toBe("test.md")
+      expect(tx.snapshot.originalContent).toBe("hello world")
+      expect(tx.snapshot.checksum).toBeTruthy()
+      expect(tx.snapshot.id).toMatch(/^snap_/)
+      expect(tx.status).toBe("pending")
     })
   })
 
-  it("2. restore snapshot content via readContent", async () => {
+  it("2. readContent retrieves original content", async () => {
     await withTempDir(async (dir, mgr) => {
-      const snap = await mgr.create("test.md", "hello world")
-      const content = await mgr.readContent(snap)
+      const tx = await mgr.create("test.md", "hello world")
+      const content = await mgr.readContent(tx.snapshot)
       expect(content).toBe("hello world")
     })
   })
 
   it("3. restoreToFile writes content to target path", async () => {
     await withTempDir(async (dir, mgr) => {
-      const snap = await mgr.create("test.md", "original content")
+      const tx = await mgr.create("test.md", "original content")
       const targetPath = join(dir, "restored.md")
-      await mgr.restoreToFile(snap, targetPath)
+      await mgr.restoreToFile(tx.snapshot, targetPath)
       const content = readFileSync(targetPath, "utf-8")
       expect(content).toBe("original content")
     })
@@ -64,11 +65,10 @@ describe("SnapshotManager", () => {
     })
   })
 
-  it("6. checksum verification on restore", async () => {
+  it("6. getTransaction returns null for unknown ID", async () => {
     await withTempDir(async (dir, mgr) => {
-      const snap = await mgr.create("test.md", "hello world")
-      const content = await mgr.readContent(snap)
-      expect(content).toBe("hello world")
+      const tx = await mgr.getTransaction("nonexistent")
+      expect(tx).toBeNull()
     })
   })
 })

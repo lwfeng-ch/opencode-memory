@@ -42,10 +42,11 @@ describe("RiskEngine", () => {
     expect(result.autoExecutable).toBe(false)
   })
 
-  it("3. low confidence delete → high risk", () => {
-    const result = engine.assessRepair(makeRepair({ action: "delete", risk: "high" }))
-    expect(result.label).toBe("high")
-    expect(result.autoExecutable).toBe(false)
+  it("3. medium risk archive → auto-executable (low score)", () => {
+    const result = engine.assessRepair(makeRepair({ action: "archive", risk: "medium" }))
+    // archive + medium risk → score < 0.3 → autoExecutable = true
+    expect(result.score).toBeLessThan(0.3)
+    expect(result.autoExecutable).toBe(true)
   })
 
   it("4. fact evidence — user input reduces risk", () => {
