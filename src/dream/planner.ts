@@ -8,12 +8,15 @@
  */
 
 import type { ConflictGraph } from "../conflict/types.js"
-import type { EvidenceReport, MemoryFile } from "./analyzer/evidence.js"
+import type { EvidenceReport, MemoryFile, FactSummary } from "./analyzer/evidence.js"
 import type { ConsolidationCandidate } from "./candidate/types.js"
 import { ClusterBuilder } from "./cluster/builder.js"
 import { EvidenceCollector } from "./analyzer/evidence.js"
 import { CandidateGenerator } from "./candidate/generator.js"
 import type { DreamMode } from "./mode.js"
+import { getFactRootDir } from "../paths.js"
+import { readdir, readFile } from "node:fs/promises"
+import { join } from "node:path"
 
 export interface DiscoveryReport {
   totalClusters: number
@@ -21,6 +24,56 @@ export interface DiscoveryReport {
   candidates: ConsolidationCandidate[]
   duration: number
   errors: string[]
+}
+
+/**
+ * Scan fact/sessions/ directory and collect FactSummary records.
+ * Indexed by factId ($id) for O(1) lookup during evidence collection.
+ */
+export async function collectFacts(memoryDir: string): Promise<Map<string, FactSummary[]>> {
+  const factMap = new Map<string, FactSummary[]>()
+  const factRoot = getFactRootDir(memoryDir)
+  const sessionsDir = join(factRoot, "sessions")
+
+  try {
+    const yearDirs = await readdir(sessionsDir, { withFileTypes: true })
+    for (const yearDir of yearDirs) {
+      if (!yearDir.isDirectory()) continue
+      const monthDir = join(sessionsDir, yearDir.name)
+      const monthEntries = await readdir(monthDir, { withFileTypes: true })
+      for (const entry of monthEntries) {
+        if (!entry.isFile() || !entry.name.endsWith(".json")) continue
+        try {
+          const content = await readFile(join(monthDir, entry.name), "utf-8")
+          const record = JSON.parse(content) as {
+            $id: string
+            session_id: string
+            stats: { messages: number; tool_calls: number; duration_minutes: number }
+            git: { branch: string }
+          }
+          if (record.$id && record.session_id) {
+            const summary: FactSummary = {
+              sessionId: record.session_id,
+              factId: record.$id,
+              messageCount: record.stats?.messages ?? 0,
+              toolCallCount: record.stats?.tool_calls ?? 0,
+              durationMinutes: record.stats?.duration_minutes ?? 0,
+              gitBranch: record.git?.branch ?? "",
+            }
+            const existing = factMap.get(record.$id) ?? []
+            existing.push(summary)
+            factMap.set(record.$id, existing)
+          }
+        } catch {
+          // skip unparseable fact files
+        }
+      }
+    }
+  } catch {
+    // fact/sessions/ doesn't exist yet — empty map
+  }
+
+  return factMap
 }
 
 export class DreamRunner {
@@ -36,12 +89,14 @@ export class DreamRunner {
 
   /**
    * Execute the full Discovery pipeline.
-   * Mode parameter reserved for future DreamMode switching.
+   * @param factSummaries — v0.5.1: optional fact data for evidence enrichment.
+   *   Can be populated via collectFacts().
    */
   async run(
     conflictGraph: ConflictGraph,
     memories: MemoryFile[],
     _mode: DreamMode = "v0.5",
+    factSummaries?: Map<string, FactSummary[]>,
   ): Promise<DiscoveryReport> {
     const t0 = Date.now()
     const errors: string[] = []
@@ -58,7 +113,7 @@ export class DreamRunner {
       const evidenceReports: EvidenceReport[] = []
       for (const cluster of clusters) {
         try {
-          const evidence = this.evidenceCollector.collect(cluster, memories)
+          const evidence = this.evidenceCollector.collect(cluster, memories, factSummaries)
           evidenceReports.push(evidence)
         } catch (err) {
           errors.push(`evidence collection failed for ${cluster.id}: ${err instanceof Error ? err.message : String(err)}`)

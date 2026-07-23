@@ -77,6 +77,9 @@ export interface MemoryProvenance {
     type: ProvenanceSourceType
     sessionId?: string
     sourceFile?: string
+    /** v0.5.1: Points to the fact record in fact/sessions/YYYY/MM/session_xxx.json.
+     *  Format: "memory://fact-session/{sessionId}". Populated by extraction. */
+    factId?: string
   }
 
   created: {

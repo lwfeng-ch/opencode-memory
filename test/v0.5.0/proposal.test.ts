@@ -16,8 +16,8 @@ function makeCandidate(overrides: Partial<ConsolidationCandidate> = {}): Consoli
     evidence: {
       clusterId: "cluster-1",
       members: [
-        { filename: "a.md", worthiness: 0.9, confidence: 1.0, usage: 5, feedback: 0.8, temporal: 0.9 },
-        { filename: "b.md", worthiness: 0.1, confidence: 0.3, usage: 0, feedback: 0, temporal: 0.3 },
+        { filename: "a.md", worthiness: 0.9, confidence: 1.0, usage: 5, feedback: 0.8, temporal: 0.9, sourceType: "user" },
+        { filename: "b.md", worthiness: 0.1, confidence: 0.3, usage: 0, feedback: 0, temporal: 0.3, sourceType: "extraction" },
       ],
       dominant: "a.md",
     },
@@ -123,7 +123,7 @@ describe("ProposalMapper", () => {
       evidence: {
         clusterId: "c1",
         members: [
-          { filename: "a.md", worthiness: 0.3, confidence: 0.5, usage: 0, feedback: 0, temporal: 0.5 },
+          { filename: "a.md", worthiness: 0.3, confidence: 0.5, usage: 0, feedback: 0, temporal: 0.5, sourceType: "unknown" },
         ],
       },
     }))

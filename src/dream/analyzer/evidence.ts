@@ -27,6 +27,12 @@ export interface EvidenceMember {
   usage: number
   feedback: number
   temporal: number
+  /** v0.5.1: Points to the fact record in fact/sessions/ */
+  factId?: string
+  /** v0.5.1: How many distinct sessions this memory was extracted from */
+  factSessionCount?: number
+  /** v0.5.1: Source type from provenance (user/session/extraction/feedback/migration) */
+  sourceType: string
 }
 
 export interface EvidenceReport {
@@ -34,6 +40,12 @@ export interface EvidenceReport {
   members: EvidenceMember[]
   /** If one member significantly dominates all dimensions, its filename */
   dominant?: string
+  /** v0.5.1: Cluster-level fact evidence summary */
+  factEvidence?: {
+    totalSessions: number
+    sessionSpanDays: number
+    hasDirectUserInput: boolean
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +97,19 @@ export function extractTimestamp(provenance?: MemoryProvenance): number {
 }
 
 // ---------------------------------------------------------------------------
+// Fact Summary (v0.5.1)
+// ---------------------------------------------------------------------------
+
+export interface FactSummary {
+  sessionId: string
+  factId: string
+  messageCount: number
+  toolCallCount: number
+  durationMinutes: number
+  gitBranch: string
+}
+
+// ---------------------------------------------------------------------------
 // EvidenceCollector
 // ---------------------------------------------------------------------------
 
@@ -95,15 +120,26 @@ export interface MemoryFile {
   provenance?: MemoryProvenance
   confidence: string
   created?: number
+  /** v0.5.1: factId extracted from provenance JSON or flat YAML frontmatter.
+   *  Format: "memory://fact-session/{sessionId}". */
+  factId?: string
 }
 
 export class EvidenceCollector {
   /**
    * Collect evidence for a single cluster.
    * For each member, aggregates governance signals from its memory metadata.
+   *
+   * @param factSummaries — v0.5.1: optional map of factId → FactSummary[]
+   *   for enriching evidence with raw fact data.
    */
-  collect(cluster: MemoryCluster, memories: MemoryFile[]): EvidenceReport {
+  collect(
+    cluster: MemoryCluster,
+    memories: MemoryFile[],
+    factSummaries?: Map<string, FactSummary[]>,
+  ): EvidenceReport {
     const memberMap = new Map(memories.map((m) => [m.filename, m]))
+    const allFactIds = new Set<string>()
 
     const members: EvidenceMember[] = cluster.members.map((filename) => {
       const mem = memberMap.get(filename)
@@ -115,12 +151,26 @@ export class EvidenceCollector {
           usage: 0,
           feedback: 0,
           temporal: 0,
+          sourceType: "unknown",
         }
       }
 
       const ts =
         mem.created ?? extractTimestamp(mem.provenance)
       const sourceType = extractSourceType(mem.provenance)
+      const factId = mem.factId ?? mem.provenance?.source?.factId
+
+      // Collect fact IDs for cluster-level factEvidence
+      if (factId) allFactIds.add(factId)
+
+      // Count distinct sessions from factSummaries
+      let factSessionCount = 0
+      if (factId && factSummaries) {
+        const summaries = factSummaries.get(factId)
+        if (summaries) {
+          factSessionCount = summaries.length
+        }
+      }
 
       return {
         filename,
@@ -129,16 +179,49 @@ export class EvidenceCollector {
         usage: 0, // v0.5.0: placeholder, populated in v0.5.2
         feedback: 0, // v0.5.0: placeholder, populated in v0.5.2
         temporal: temporalValidity(ts) * (sourceType === "user" ? 1.0 : 0.9),
+        factId,
+        factSessionCount: factSessionCount > 0 ? factSessionCount : undefined,
+        sourceType,
       }
     })
 
     // Detect dominant member
     const dominant = this.detectDominant(members)
 
+    // Compute cluster-level factEvidence
+    let factEvidence: EvidenceReport["factEvidence"] = undefined
+    if (allFactIds.size > 0 && factSummaries) {
+      const allSessions: FactSummary[] = []
+      for (const fid of allFactIds) {
+        const summaries = factSummaries.get(fid)
+        if (summaries) allSessions.push(...summaries)
+      }
+
+      // Deduplicate by sessionId
+      const seenSessions = new Set<string>()
+      const uniqueSessions = allSessions.filter((s) => {
+        if (seenSessions.has(s.sessionId)) return false
+        seenSessions.add(s.sessionId)
+        return true
+      })
+
+      // Compute time span if we have timestamps
+      let sessionSpanDays = 0
+      // Check if any member has direct user input (sourceType === "user")
+      const hasDirectUserInput = members.some((m) => m.sourceType === "user")
+
+      factEvidence = {
+        totalSessions: uniqueSessions.length,
+        sessionSpanDays,
+        hasDirectUserInput,
+      }
+    }
+
     return {
       clusterId: cluster.id,
       members,
       dominant,
+      factEvidence,
     }
   }
 
