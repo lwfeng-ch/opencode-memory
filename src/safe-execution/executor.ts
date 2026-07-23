@@ -98,7 +98,7 @@ export class SafeExecutionService {
     candidateId?: string,
   ): Promise<TransactionContext> {
     const txId = generateTransactionId()
-    let tx: TransactionContext
+    let tx: TransactionContext | null = null
 
     try {
       // 1. Snapshot: read current file content
@@ -125,14 +125,14 @@ export class SafeExecutionService {
       tx.committedAt = Date.now()
       return tx
     } catch (err) {
-      // Attempt rollback if snapshot was created
-      if (tx!) {
+      // Attempt rollback if snapshot was created before the error
+      if (tx !== null) {
         try {
           const targetPath = join(this.memoryDir, source)
-          await this.snapshotManager.restoreToFile(tx!.snapshot, targetPath)
-          tx!.status = "rolled_back"
-          tx!.rolledBackAt = Date.now()
-          return tx!
+          await this.snapshotManager.restoreToFile(tx.snapshot, targetPath)
+          tx.status = "rolled_back"
+          tx.rolledBackAt = Date.now()
+          return tx
         } catch {
           // rollback failed — transaction is in failed state
         }
