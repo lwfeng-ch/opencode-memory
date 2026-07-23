@@ -29,6 +29,10 @@ export interface DiscoveryReport {
 /**
  * Scan fact/sessions/ directory and collect FactSummary records.
  * Indexed by factId ($id) for O(1) lookup during evidence collection.
+ *
+ * TODO(v0.5.3): Change to on-demand loading — only read fact records
+ * referenced by cluster.members[].provenance.factId instead of full scan.
+ * Current O(n) scan is acceptable while fact record count is small.
  */
 export async function collectFacts(memoryDir: string): Promise<Map<string, FactSummary[]>> {
   const factMap = new Map<string, FactSummary[]>()
@@ -48,6 +52,7 @@ export async function collectFacts(memoryDir: string): Promise<Map<string, FactS
           const record = JSON.parse(content) as {
             $id: string
             session_id: string
+            created_at: string
             stats: { messages: number; tool_calls: number; duration_minutes: number }
             git: { branch: string }
           }
@@ -55,6 +60,7 @@ export async function collectFacts(memoryDir: string): Promise<Map<string, FactS
             const summary: FactSummary = {
               sessionId: record.session_id,
               factId: record.$id,
+              timestamp: record.created_at,
               messageCount: record.stats?.messages ?? 0,
               toolCallCount: record.stats?.tool_calls ?? 0,
               durationMinutes: record.stats?.duration_minutes ?? 0,

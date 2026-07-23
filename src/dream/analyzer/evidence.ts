@@ -107,6 +107,9 @@ export interface FactSummary {
   toolCallCount: number
   durationMinutes: number
   gitBranch: string
+  /** ISO timestamp of the fact record (created_at).
+   *  Used to compute sessionSpanDays across cluster members. */
+  timestamp?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -205,8 +208,16 @@ export class EvidenceCollector {
         return true
       })
 
-      // Compute time span if we have timestamps
+      // Compute time span from fact record timestamps
       let sessionSpanDays = 0
+      const timestamps = uniqueSessions
+        .map((s) => s.timestamp ? new Date(s.timestamp).getTime() : 0)
+        .filter((t) => t > 0)
+      if (timestamps.length >= 2) {
+        const min = Math.min(...timestamps)
+        const max = Math.max(...timestamps)
+        sessionSpanDays = Math.round((max - min) / (24 * 60 * 60 * 1000))
+      }
       // Check if any member has direct user input (sourceType === "user")
       const hasDirectUserInput = members.some((m) => m.sourceType === "user")
 

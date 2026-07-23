@@ -65,11 +65,51 @@ describe("EvidenceReport factEvidence", () => {
   it("4. hasDirectUserInput when sourceType is 'user'", () => {
     const cluster = { id: "c1", level: "conflict" as const, members: ["a.md", "b.md"], confidence: 0.8, metadata: {} }
     const now = Date.now()
+    const factMap = new Map<string, { sessionId: string; factId: string; messageCount: number; toolCallCount: number; durationMinutes: number; gitBranch: string; timestamp?: string }[]>()
+    factMap.set("memory://fact-session/ses_1", [{
+      sessionId: "ses_1",
+      factId: "memory://fact-session/ses_1",
+      messageCount: 10,
+      toolCallCount: 5,
+      durationMinutes: 30,
+      gitBranch: "main",
+      timestamp: new Date().toISOString(),
+    }])
+    // Use provenance with sourceType "user" to trigger hasDirectUserInput
     const result = collector.collect(cluster, [
-      { filename: "a.md", content: "", worthiness: 0.9, confidence: "explicit", created: now },
+      { filename: "a.md", content: "", worthiness: 0.9, confidence: "explicit", created: now, factId: "memory://fact-session/ses_1" },
       { filename: "b.md", content: "", worthiness: 0.2, confidence: "inferred", created: now },
-    ])
-    // sourceType defaults to "unknown" for both (no provenance)
-    expect(result.factEvidence).toBeUndefined()
+    ], factMap)
+    // sourceType is "unknown" for both (no provenance) — not "user"
+    // Verify the structure is correct
+    expect(result.factEvidence).toBeDefined()
+    expect(result.factEvidence!.totalSessions).toBe(1)
+  })
+
+  it("5. sourceType 'user' → hasDirectUserInput is true", () => {
+    const cluster = { id: "c1", level: "conflict" as const, members: ["a.md", "b.md"], confidence: 0.8, metadata: {} }
+    const now = Date.now()
+    const factMap = new Map<string, { sessionId: string; factId: string; messageCount: number; toolCallCount: number; durationMinutes: number; gitBranch: string; timestamp?: string }[]>()
+    factMap.set("memory://fact-session/ses_1", [{
+      sessionId: "ses_1",
+      factId: "memory://fact-session/ses_1",
+      messageCount: 10,
+      toolCallCount: 5,
+      durationMinutes: 30,
+      gitBranch: "main",
+      timestamp: new Date().toISOString(),
+    }])
+    // Create minimal provenance with sourceType "user"
+    const userProvenance = {
+      source: { type: "user" as const, sessionId: "ses_1" },
+      created: { timestamp: now, actor: "user" as const },
+      history: [],
+    }
+    const result = collector.collect(cluster, [
+      { filename: "a.md", content: "", worthiness: 0.9, confidence: "explicit", created: now, provenance: userProvenance, factId: "memory://fact-session/ses_1" },
+      { filename: "b.md", content: "", worthiness: 0.2, confidence: "inferred", created: now },
+    ], factMap)
+    expect(result.factEvidence).toBeDefined()
+    expect(result.factEvidence!.hasDirectUserInput).toBe(true)
   })
 })
