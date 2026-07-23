@@ -62,10 +62,31 @@ export function generateActionId(): string {
   return `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-export function assessRisk(confidence: string | undefined, daysSinceRecall: number | null): CandidateRisk {
+export interface AssessRiskOptions {
+  /** v0.5.2: Worthiness score for multi-dimensional risk assessment */
+  worthiness?: number
+  /** v0.5.2: Fact-layer evidence for risk calibration */
+  factEvidence?: {
+    totalSessions: number
+    hasDirectUserInput: boolean
+  }
+}
+
+export function assessRisk(
+  confidence: string | undefined,
+  daysSinceRecall: number | null,
+  options?: AssessRiskOptions,
+): CandidateRisk {
+  // Backward compatible: existing 2-arg callers work unchanged
   if (confidence === "explicit") return "low"
   if (daysSinceRecall !== null && daysSinceRecall < 30) return "low"
   if (daysSinceRecall !== null && daysSinceRecall < 180) return "medium"
+
+  // v0.5.2: Multi-dimensional with fact evidence
+  if (options?.factEvidence?.hasDirectUserInput && options?.worthiness !== undefined && options.worthiness > 0.5) {
+    return "low"
+  }
+
   return "high"
 }
 
