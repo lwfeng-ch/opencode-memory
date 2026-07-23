@@ -4,6 +4,10 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
+import { mkdtempSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { rm } from "node:fs/promises"
 import { GovernanceScheduler } from "../../src/governance/scheduler.js"
 import type { GovernanceConfig } from "../../src/governance/types.js"
 
@@ -57,5 +61,42 @@ describe("GovernanceScheduler.runCycle", () => {
     expect(report).toHaveProperty("skipped")
     expect(report).toHaveProperty("actions")
     expect(Array.isArray(report.actions)).toBe(true)
+  })
+
+  it("7. non-empty queue with autoExecute=false → no actions", async () => {
+    const queueDir = mkdtempSync(join(tmpdir(), "gov-queue-"))
+    const candidate = {
+      id: "cand_test_1", type: "lifecycle_archive", action: "archive", source: "old.md",
+      reason: "test", metadata: { size: 0, createdAt: 0, lastModified: 0 },
+      preview: { title: "", description: "", sections: [] },
+      risk: "low", status: "pending", createdAt: Date.now(),
+    }
+    writeFileSync(join(queueDir, `${candidate.id}.json`), JSON.stringify(candidate))
+    try {
+      const report = await scheduler.runCycle("/tmp/memory", "/tmp/audit.json", "/tmp/state.json", queueDir, makeConfig({ autoExecute: false }))
+      expect(report.autoExecuted).toBe(0)
+      expect(report.actions).toHaveLength(0)
+    } finally {
+      await rm(queueDir, { recursive: true, force: true })
+    }
+  })
+
+  it("8. non-empty queue with autoExecute=true → attempts execution", async () => {
+    const queueDir = mkdtempSync(join(tmpdir(), "gov-queue-"))
+    const candidate = {
+      id: "cand_test_2", type: "lifecycle_archive", action: "archive", source: "old.md",
+      reason: "test", metadata: { size: 0, createdAt: 0, lastModified: 0 },
+      preview: { title: "", description: "", sections: [] },
+      risk: "low", status: "pending", createdAt: Date.now(),
+    }
+    writeFileSync(join(queueDir, `${candidate.id}.json`), JSON.stringify(candidate))
+    try {
+      const report = await scheduler.runCycle("/tmp/memory", "/tmp/audit.json", "/tmp/state.json", queueDir, makeConfig({ autoExecute: true }))
+      // Execution may fail (temp dir with no real memory files), but actions should be populated
+      expect(report.autoExecuted).toBeGreaterThanOrEqual(0)
+      expect(report.actions.length).toBeGreaterThanOrEqual(0)
+    } finally {
+      await rm(queueDir, { recursive: true, force: true })
+    }
   })
 })

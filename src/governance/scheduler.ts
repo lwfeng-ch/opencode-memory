@@ -69,6 +69,17 @@ export class GovernanceScheduler {
     const queue = new FileCandidateQueue(queueDir)
     const pending = await queue.getPending()
 
+    // Short-circuit: no execution needed
+    if (!config.autoExecute || pending.length === 0) {
+      return {
+        ranAt: new Date().toISOString(),
+        durationMs: Date.now() - t0,
+        autoExecuted: 0,
+        skipped: 0,
+        actions: [],
+      }
+    }
+
     // 2. Filter autoExecutable
     const riskEngine = new RiskEngine()
     const autoCandidates: Array<{ candidate: RepairCandidate; riskScore: number }> = []
@@ -83,8 +94,8 @@ export class GovernanceScheduler {
     const toExecute = autoCandidates.slice(0, config.maxAutoPerRun)
     const skipped = autoCandidates.length - toExecute.length
 
-    // 3. Execute if autoExecute is enabled
-    if (config.autoExecute && toExecute.length > 0) {
+    // 3. Execute
+    if (toExecute.length > 0) {
       const repairService = new RepairService(memoryDir, new AuditLog(auditLogPath))
       const snapshotManager = new SnapshotManager(memoryDir)
       const executor = new SafeExecutionService(repairService, snapshotManager, riskEngine, memoryDir)
