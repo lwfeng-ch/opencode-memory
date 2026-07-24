@@ -3,6 +3,7 @@
 interface PipelineStage {
   name: string;
   status: string;
+  lastRun: string | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -36,7 +37,7 @@ export function PipelineStatus({
             />
             <span className="text-sm text-zinc-300">{stage.name}</span>
           </div>
-          <span className="text-xs text-zinc-500">{stage.status}</span>
+          <span className="text-xs text-zinc-500">{stage.lastRun ?? "—"}</span>
         </div>
       ))}
     </div>

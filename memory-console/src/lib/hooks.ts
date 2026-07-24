@@ -5,6 +5,7 @@ import {
   fetchHealth,
   fetchMemories,
   fetchMemoryDetail,
+  fetchMemoryHistory,
 } from "./api";
 
 export function useHealth() {
@@ -33,6 +34,14 @@ export function useMemoryDetail(id: string | null) {
   return useQuery({
     queryKey: ["memory", id],
     queryFn: () => fetchMemoryDetail(id!),
+    enabled: !!id,
+  });
+}
+
+export function useMemoryHistory(id: string | null) {
+  return useQuery({
+    queryKey: ["memory-history", id],
+    queryFn: () => fetchMemoryHistory(id!),
     enabled: !!id,
   });
 }

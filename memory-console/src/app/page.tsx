@@ -34,10 +34,10 @@ function DashboardContent() {
   }
 
   const stages = [
-    { name: "Capture", status: health.pipelineStatus.capture },
-    { name: "Extraction", status: health.pipelineStatus.extraction },
-    { name: "Dream", status: health.pipelineStatus.dream },
-    { name: "Governance", status: health.pipelineStatus.governance },
+    { name: "Capture", status: health.pipelineStatus.capture, lastRun: null },
+    { name: "Extraction", status: health.pipelineStatus.extraction, lastRun: null },
+    { name: "Dream", status: health.pipelineStatus.dream, lastRun: null },
+    { name: "Governance", status: health.pipelineStatus.governance, lastRun: null },
   ];
 
   return (

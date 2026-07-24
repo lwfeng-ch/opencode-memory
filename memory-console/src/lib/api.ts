@@ -46,3 +46,9 @@ export async function fetchMemoryDetail(
   if (!res.ok) throw new Error(`Failed to fetch memory: ${res.status}`);
   return res.json();
 }
+
+export async function fetchMemoryHistory(id: string) {
+  const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(id)}/history`);
+  if (!res.ok) throw new Error(`Failed to fetch history: ${res.status}`);
+  return res.json();
+}
