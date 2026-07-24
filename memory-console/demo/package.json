@@ -1,0 +1,7 @@
+{
+  "name": "memory-console-demo",
+  "private": true,
+  "scripts": {
+    "demo": "echo 'Demo mode: point your browser to http://localhost:3000 and use the console with demo data'"
+  }
+}

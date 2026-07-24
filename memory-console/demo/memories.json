@@ -1,0 +1,6 @@
+[
+  { "filename": "python_preference.md", "name": "User prefers Python", "type": "fact", "scope": "user", "confidence": "explicit", "status": "active", "description": "User explicitly stated Python preference", "mtimeMs": 1720000000000, "recallCount": 12 },
+  { "filename": "fastapi_choice.md", "name": "API choice: FastAPI", "type": "fact", "scope": "project", "confidence": "explicit", "status": "active", "description": "Project uses FastAPI framework", "mtimeMs": 1720000000000, "recallCount": 8 },
+  { "filename": "react_preference.md", "name": "I use React", "type": "fact", "scope": "user", "confidence": "explicit", "status": "active", "description": "User stated React preference in 2025", "mtimeMs": 1710000000000, "recallCount": 3 },
+  { "filename": "vue_preference.md", "name": "I use Vue", "type": "fact", "scope": "user", "confidence": "explicit", "status": "active", "description": "User stated Vue preference in 2026", "mtimeMs": 1730000000000, "recallCount": 1 }
+]
