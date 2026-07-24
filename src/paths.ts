@@ -134,3 +134,8 @@ export function getCursorDir(memoryDir: string): string {
 export function getCursorPath(memoryDir: string): string {
   return join(getCursorDir(memoryDir), 'extraction-cursor.json');
 }
+
+/** HTTP server discovery file: <memoryDir>/http.json */
+export function getHttpDiscoveryPath(memoryDir: string): string {
+  return join(memoryDir, 'http.json');
+}
