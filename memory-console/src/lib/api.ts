@@ -3,6 +3,7 @@ import type {
   MemoryListResponse,
   MemoryDetailResponse,
 } from "@/types/api";
+import type { GovernanceProposal, AuditResponse } from "@/types/governance";
 
 const API_BASE = "http://127.0.0.1:5173/api/v1";
 
@@ -50,5 +51,32 @@ export async function fetchMemoryDetail(
 export async function fetchMemoryHistory(id: string) {
   const res = await fetch(`${API_BASE}/memories/${encodeURIComponent(id)}/history`);
   if (!res.ok) throw new Error(`Failed to fetch history: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchProposals(): Promise<GovernanceProposal[]> {
+  const res = await fetch(`${API_BASE}/governance/proposals`);
+  if (!res.ok) throw new Error(`Failed to fetch proposals: ${res.status}`);
+  return res.json();
+}
+
+export async function approveProposal(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`${API_BASE}/governance/proposals/${encodeURIComponent(id)}/approve`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to approve proposal: ${res.status}`);
+  return res.json();
+}
+
+export async function rejectProposal(id: string): Promise<{ success: boolean; status: string }> {
+  const res = await fetch(`${API_BASE}/governance/proposals/${encodeURIComponent(id)}/reject`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to reject proposal: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAuditEvents(params?: { page?: number }): Promise<AuditResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set("page", String(params.page));
+  const url = `${API_BASE}/audit/events${searchParams.toString() ? `?${searchParams}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch audit events: ${res.status}`);
   return res.json();
 }
