@@ -13,7 +13,7 @@ function PipelineContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5173/api/v1/pipeline/sessions")
+    fetch("http://127.0.0.1:4096/api/v1/pipeline/sessions")
       .then((r) => r.json()).then((d) => { setSessions(d.sessions); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 

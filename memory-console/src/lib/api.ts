@@ -5,7 +5,7 @@ import type {
 } from "@/types/api";
 import type { GovernanceProposal, AuditResponse } from "@/types/governance";
 
-const API_BASE = "http://127.0.0.1:5173/api/v1";
+const API_BASE = "http://127.0.0.1:4096/api/v1";
 
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetch(`${API_BASE}/health`);

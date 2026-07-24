@@ -10,7 +10,7 @@ function TimelineContent() {
   const { data: memories } = useQuery({
     queryKey: ["memories"],
     queryFn: async () => {
-      const res = await fetch("http://127.0.0.1:5173/api/v1/memories");
+      const res = await fetch("http://127.0.0.1:4096/api/v1/memories");
       return res.json();
     },
   });
@@ -21,7 +21,7 @@ function TimelineContent() {
       if (!memories?.memories?.length) return {};
       const entries: Record<string, unknown> = {};
       for (const m of memories.memories.slice(0, 10)) {
-        const res = await fetch(`http://127.0.0.1:5173/api/v1/memories/${encodeURIComponent(m.filename)}/history`);
+        const res = await fetch(`http://127.0.0.1:4096/api/v1/memories/${encodeURIComponent(m.filename)}/history`);
         if (res.ok) entries[m.filename] = await res.json();
       }
       return entries;

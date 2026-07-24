@@ -19,7 +19,7 @@ function ConflictsContent() {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5173/api/v1/conflicts")
+    fetch("http://127.0.0.1:4096/api/v1/conflicts")
       .then((r) => r.json()).then((d) => { setConflicts(d); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 

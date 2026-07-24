@@ -16,7 +16,7 @@ function AuditContent() {
   const { data } = useQuery<AuditResponse>({
     queryKey: ["audit"],
     queryFn: async () => {
-      const res = await fetch("http://127.0.0.1:5173/api/v1/audit/events");
+      const res = await fetch("http://127.0.0.1:4096/api/v1/audit/events");
       return res.json();
     },
     refetchInterval: 30_000,

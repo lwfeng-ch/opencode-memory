@@ -13,7 +13,7 @@ function GraphContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5173/api/v1/graph")
+    fetch("http://127.0.0.1:4096/api/v1/graph")
       .then((r) => r.json())
       .then((data) => {
         setNodes(data.nodes.map((n: { id: string; type: string; label: string; data: Record<string, unknown> }, i: number) => ({

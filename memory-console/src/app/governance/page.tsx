@@ -13,7 +13,7 @@ function GovernanceContent() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5173/api/v1/pipeline/status")
+    fetch("http://127.0.0.1:4096/api/v1/pipeline/status")
       .then((r) => r.json()).then((d) => { setStatus(d); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
