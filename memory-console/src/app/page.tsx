@@ -75,6 +75,12 @@ function DashboardContent() {
             >
               Timeline &rarr;
             </a>
+            <a
+              href="/graph"
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Graph &rarr;
+            </a>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500" />
               <span className="text-sm text-zinc-400">Connected</span>
