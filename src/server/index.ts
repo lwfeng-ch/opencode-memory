@@ -6,6 +6,7 @@ import { getHttpDiscoveryPath } from "../paths.js";
 import { corsMiddleware } from "./middleware/cors.js";
 import { createMemoriesRoutes } from "./routes/memories.js";
 import { registerGovernanceRoutes } from "./routes/governance.js";
+import { graphRoutes } from "./routes/graph.js";
 import type { ServerType } from "@hono/node-server";
 
 let serverInstance: ServerType | null = null;
@@ -48,6 +49,7 @@ export async function startMemoryServer(
   // Routes
   app.route("/api/v1/memories", createMemoriesRoutes(config.store));
   registerGovernanceRoutes(app);
+  app.route("/api/v1/graph", graphRoutes);
 
   // Start server
   const port = config.port ?? 0; // 0 = random port
