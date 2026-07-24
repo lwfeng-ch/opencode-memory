@@ -5,6 +5,7 @@ import { writeFile } from "fs/promises";
 import { getHttpDiscoveryPath } from "../paths.js";
 import { corsMiddleware } from "./middleware/cors.js";
 import { createMemoriesRoutes } from "./routes/memories.js";
+import { registerGovernanceRoutes } from "./routes/governance.js";
 import type { ServerType } from "@hono/node-server";
 
 let serverInstance: ServerType | null = null;
@@ -20,8 +21,6 @@ export interface ServerConfig {
 export async function startMemoryServer(
   config: ServerConfig,
 ): Promise<number> {
-  if (serverInstance) return serverPort;
-
   const app = new Hono();
 
   // CORS
@@ -41,13 +40,14 @@ export async function startMemoryServer(
         capture: "running",
         extraction: "healthy",
         dream: "idle",
-        governance: "waiting",
+        governance: "ready",
       },
     });
   });
 
   // Routes
   app.route("/api/v1/memories", createMemoriesRoutes(config.store));
+  registerGovernanceRoutes(app);
 
   // Start server
   const port = config.port ?? 0; // 0 = random port
