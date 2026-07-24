@@ -43,23 +43,35 @@ export async function startConsoleServer(config: ConsoleServerConfig = {}): Prom
   const consoleDir = config.consoleDir ?? CONSOLE_OUT_DIR;
 
   server = createServer(async (req, res) => {
-    let path = req.url ?? "/";
-    if (path === "/") path = "/index.html";
+    let urlPath = (req.url ?? "/").split("?")[0]; // strip query string
+    if (urlPath === "/") urlPath = "/index.html";
 
-    const filePath = join(consoleDir, path);
+    // Try exact path first, then with .html extension, then directory/index.html
+    const candidates = [
+      join(consoleDir, urlPath),
+      join(consoleDir, urlPath + ".html"),
+      join(consoleDir, urlPath, "index.html"),
+    ];
 
-    try {
-      const s = await stat(filePath);
-      if (!s.isFile()) throw new Error("not a file");
+    let served = false;
+    for (const filePath of candidates) {
+      try {
+        const s = await stat(filePath);
+        if (!s.isFile()) continue;
+        const ext = extname(filePath);
+        const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
+        const content = await readFile(filePath);
+        res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-cache" });
+        res.end(content);
+        served = true;
+        break;
+      } catch {
+        // try next candidate
+      }
+    }
 
-      const ext = extname(filePath);
-      const contentType = MIME_TYPES[ext] ?? "application/octet-stream";
-      const content = await readFile(filePath);
-
-      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-cache" });
-      res.end(content);
-    } catch {
-      // SPA fallback: serve index.html for unknown routes
+    if (!served) {
+      // SPA fallback: serve index.html for client-side routing
       try {
         const indexContent = await readFile(join(consoleDir, "index.html"));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
