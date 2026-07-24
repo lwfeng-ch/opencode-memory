@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Sora, DM_Sans, JetBrains_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { I18nProvider } from "@/lib/i18n-context";
 import "./globals.css";
 
 const sora = Sora({ subsets: ["latin"], weight: ["400", "600", "700", "800"], variable: "--font-sora" });
@@ -17,7 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`dark ${sora.variable} ${dmSans.variable} ${jetbrains.variable}`}>
       <body className="bg-[#09090b] text-zinc-100 antialiased font-[family-name:var(--font-dm)]">
-        <TooltipProvider>{children}</TooltipProvider>
+        <I18nProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </I18nProvider>
       </body>
     </html>
   );
