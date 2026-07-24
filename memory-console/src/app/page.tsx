@@ -87,6 +87,12 @@ function DashboardContent() {
             >
               Conflicts &rarr;
             </a>
+            <a
+              href="/pipeline"
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Pipeline &rarr;
+            </a>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500" />
               <span className="text-sm text-zinc-400">Connected</span>
