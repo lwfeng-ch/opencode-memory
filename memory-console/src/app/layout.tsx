@@ -1,23 +1,18 @@
 import type { Metadata } from "next";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
-import { Geist } from "next/font/google";
-import { cn } from "@/lib/utils";
-
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "Memory Governance Console",
-  description: "opencode-memory v0.6 governance dashboard",
+  description: "opencode-memory governance platform",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
-      <body className="bg-black text-zinc-100 antialiased">{children}</body>
+    <html lang="en" className="dark">
+      <body className="bg-black text-zinc-100 antialiased">
+        <TooltipProvider>{children}</TooltipProvider>
+      </body>
     </html>
   );
 }
