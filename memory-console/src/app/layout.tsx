@@ -10,6 +10,7 @@ const jetbrains = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500"], v
 export const metadata: Metadata = {
   title: "MemoryOS — Governance Console",
   description: "AI agent memory governance platform",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=5, minimum-scale=0.5",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -141,15 +141,15 @@ function DashboardContent() {
       <div className="fixed inset-0 bg-radial-glow pointer-events-none" />
       <div className="relative z-10">
         {/* Header */}
-        <header className="border-b border-white/[0.04] px-8 py-5">
+        <header className="border-b border-white/[0.04] px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-3">
-              <h1 className="font-[family-name:var(--font-sora)] text-xl font-bold tracking-tight text-zinc-100">MemoryOS</h1>
-              <span className="text-[11px] font-medium text-zinc-600 tracking-wide">GOVERNANCE CONSOLE</span>
-              <span className="font-[family-name:var(--font-mono)] text-[10px] text-zinc-700 ml-1">v0.6</span>
+              <h1 className="font-[family-name:var(--font-sora)] text-lg font-bold tracking-tight text-zinc-100">MemoryOS</h1>
+              <span className="text-[10px] font-medium text-zinc-600 tracking-wide">GOVERNANCE CONSOLE</span>
+              <span className="font-[family-name:var(--font-mono)] text-[9px] text-zinc-700">v0.6</span>
             </div>
-            <div className="flex items-center gap-5">
-              <nav className="flex items-center gap-4">
+            <div className="flex items-center gap-4">
+              <nav className="flex items-center gap-3 text-[12px]">
                 <NavLink href="/memories">Explorer</NavLink>
                 <NavLink href="/approval">Approval</NavLink>
                 <NavLink href="/timeline">Timeline</NavLink>
@@ -159,41 +159,43 @@ function DashboardContent() {
                 <NavLink href="/audit">Audit</NavLink>
                 <NavLink href="/governance">Governance</NavLink>
               </nav>
-              <div className="flex items-center gap-2 pl-4 border-l border-white/[0.06]">
-                <div className="relative h-2 w-2">
+              <div className="flex items-center gap-2 pl-3 border-l border-white/[0.06]">
+                <div className="relative h-1.5 w-1.5">
                   <div className="absolute inset-0 rounded-full bg-emerald-400 animate-pulse-dot" />
                   <div className="absolute inset-0 rounded-full bg-emerald-400 opacity-30 animate-ping" />
                 </div>
-                <span className="text-[11px] font-medium text-emerald-400/80 tracking-wide">LIVE</span>
+                <span className="text-[10px] font-medium text-emerald-400/80 tracking-wide">LIVE</span>
               </div>
             </div>
           </div>
         </header>
 
         {/* Main */}
-        <main className="px-8 py-8 max-w-[1400px]">
-          <div className="grid grid-cols-4 gap-4 mb-8">
+        <main className="p-6 min-h-[calc(100vh-65px)]">
+          {/* Metrics Row */}
+          <div className="grid grid-cols-4 gap-4 mb-4">
             <MetricCard label="Memories" value={health.memoryCount.toLocaleString()} subtitle="active memory units" color="#22c55e" sparkData={[3, 5, 4, 7, 6, 8, 9]} delay="delay-100" />
             <MetricCard label="Quality" value="96.2%" subtitle="memory intelligence score" color="#3b82f6" sparkData={[88, 90, 91, 93, 94, 95, 96]} delay="delay-200" />
             <MetricCard label="Conflicts" value="0" subtitle="open conflicts" color="#71717a" sparkData={[2, 1, 3, 1, 0, 0, 0]} delay="delay-300" />
             <MetricCard label="Risk Level" value="Low" subtitle="all clear" color="#22c55e" sparkData={[1, 1, 2, 1, 1, 1, 1]} delay="delay-400" />
           </div>
 
-          <div className="grid grid-cols-5 gap-4">
-            <div className="col-span-3 card-hover animate-fade-up delay-500 rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-5">
+          {/* Middle Row: Pipeline + Activity */}
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="col-span-2 card-hover animate-fade-up delay-500 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className="font-[family-name:var(--font-sora)] text-sm font-semibold text-zinc-300 tracking-wide">Pipeline Status</h2>
                 <span className="font-[family-name:var(--font-mono)] text-[10px] text-zinc-600">4 stages</span>
               </div>
-              <div className="grid grid-cols-2 gap-x-8">
+              <div className="grid grid-cols-2 gap-x-6">
                 {stages.map((s, i) => (
                   <PipelineStage key={s.name} {...s} isLast={i === stages.length - 1} />
                 ))}
               </div>
             </div>
 
-            <div className="col-span-2 card-hover animate-fade-up delay-600 rounded-xl border border-white/[0.06] bg-white/[0.02] p-6 backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-4">
+            <div className="card-hover animate-fade-up delay-600 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 backdrop-blur-sm">
+              <div className="flex items-center justify-between mb-3">
                 <h2 className="font-[family-name:var(--font-sora)] text-sm font-semibold text-zinc-300 tracking-wide">Recent Activity</h2>
                 <span className="font-[family-name:var(--font-mono)] text-[10px] text-zinc-600">today</span>
               </div>
@@ -203,6 +205,62 @@ function DashboardContent() {
                 <ActivityItem text="Conflict resolved: React → Vue preference" time="25 min ago" color="bg-amber-400" />
                 <ActivityItem text="Dream consolidation skipped (gate not met)" time="3 hours ago" color="bg-zinc-600" />
                 <ActivityItem text="Proposal #233 approved by user" time="5 hours ago" color="bg-purple-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Row: Quick Stats + System Info */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="card-hover animate-fade-up delay-700 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 backdrop-blur-sm">
+              <h3 className="font-[family-name:var(--font-sora)] text-xs font-semibold text-zinc-400 tracking-wide mb-3">Memory Distribution</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">User scope</span>
+                  <span className="font-[family-name:var(--font-mono)] text-zinc-300">{Math.round(health.memoryCount * 0.6)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Project scope</span>
+                  <span className="font-[family-name:var(--font-mono)] text-zinc-300">{Math.round(health.memoryCount * 0.4)}</span>
+                </div>
+                <div className="mt-3 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500/60 rounded-full" style={{ width: '60%' }} />
+                </div>
+              </div>
+            </div>
+
+            <div className="card-hover animate-fade-up delay-800 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 backdrop-blur-sm">
+              <h3 className="font-[family-name:var(--font-sora)] text-xs font-semibold text-zinc-400 tracking-wide mb-3">Governance Stats</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Total actions</span>
+                  <span className="font-[family-name:var(--font-mono)] text-zinc-300">47</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Auto-executed</span>
+                  <span className="font-[family-name:var(--font-mono)] text-emerald-400">32</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Pending review</span>
+                  <span className="font-[family-name:var(--font-mono)] text-amber-400">3</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card-hover animate-fade-up delay-900 rounded-xl border border-white/[0.06] bg-white/[0.02] p-5 backdrop-blur-sm">
+              <h3 className="font-[family-name:var(--font-sora)] text-xs font-semibold text-zinc-400 tracking-wide mb-3">System</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Uptime</span>
+                  <span className="font-[family-name:var(--font-mono)] text-zinc-300">{Math.floor(health.uptime / 3600)}h {Math.floor((health.uptime % 3600) / 60)}m</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">API Port</span>
+                  <span className="font-[family-name:var(--font-mono)] text-zinc-300">4096</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500">Console</span>
+                  <span className="font-[family-name:var(--font-mono)] text-emerald-400">517</span>
+                </div>
               </div>
             </div>
           </div>
