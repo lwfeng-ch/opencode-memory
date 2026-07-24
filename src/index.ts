@@ -35,7 +35,7 @@ import type { CaptureContext } from "./capture.js"
 import { updateState, recordEvent } from "./state.js"
 import { initLogger, error as logError } from "./log.js"
 import { appendMessage } from "./message-cache.js"
-import { startMemoryServer } from "./server/index.js"
+import { startRuntime } from "./runtime/index.js"
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -192,10 +192,17 @@ export const MemoryPlugin: Plugin = async (input) => {
   const sessionRecentTools = new Map<string, string[]>()
   const MAX_RECENT_TOOLS = 10
 
-  // 8. Start HTTP memory governance server (non-blocking, fire-and-forget)
-  void startMemoryServer({ store, memoryDir, port: 0 }).catch((err) => {
+  // 8. Start Embedded Runtime (API server + Console static server)
+  // Non-blocking, fire-and-forget. Runs on localhost only.
+  void startRuntime({
+    store,
+    adapter,
+    memoryDir,
+    api: { enabled: true, host: "127.0.0.1", port: 4096 },
+    console: { enabled: true, host: "127.0.0.1", port: 517 },
+  }).catch((err: unknown) => {
     logError(
-      "memory:server",
+      "memory:runtime",
       `start failed: ${err instanceof Error ? err.message : String(err)}`,
     )
   })
