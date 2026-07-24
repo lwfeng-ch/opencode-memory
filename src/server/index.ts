@@ -8,6 +8,7 @@ import { createMemoriesRoutes } from "./routes/memories.js";
 import { registerGovernanceRoutes } from "./routes/governance.js";
 import { graphRoutes } from "./routes/graph.js";
 import { conflictRoutes } from "./routes/conflicts.js";
+import { pipelineRoutes } from "./routes/pipeline.js";
 import type { ServerType } from "@hono/node-server";
 
 let serverInstance: ServerType | null = null;
@@ -52,6 +53,7 @@ export async function startMemoryServer(
   registerGovernanceRoutes(app);
   app.route("/api/v1/graph", graphRoutes);
   app.route("/api/v1/conflicts", conflictRoutes);
+  app.route("/api/v1/pipeline", pipelineRoutes);
 
   // Start server
   const port = config.port ?? 0; // 0 = random port
