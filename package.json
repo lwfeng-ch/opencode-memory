@@ -8,6 +8,7 @@
     "node": ">=18.17"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.11",
     "@opencode-ai/plugin": "^1.14.48",
     "hono": "^4.12.31",
     "zod": "^4.0.0"
