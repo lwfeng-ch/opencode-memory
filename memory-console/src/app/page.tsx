@@ -58,10 +58,22 @@ function DashboardContent() {
               Explorer &rarr;
             </a>
             <a
+              href="/audit"
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Audit &rarr;
+            </a>
+            <a
               href="/approval"
               className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
             >
               Approval &rarr;
+            </a>
+            <a
+              href="/timeline"
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Timeline &rarr;
             </a>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500" />
