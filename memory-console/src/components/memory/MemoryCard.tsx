@@ -1,71 +1,44 @@
 "use client";
 
-import type { MemoryHeader } from "@/types/api";
 import { cn } from "@/lib/utils";
 
-const typeColors: Record<string, string> = {
-  user: "border-blue-500/30",
-  feedback: "border-amber-500/30",
-  project: "border-green-500/30",
-  reference: "border-purple-500/30",
-};
-
 interface MemoryCardProps {
-  memory: MemoryHeader;
+  filename: string;
+  name: string;
+  type?: string;
+  scope?: string;
+  confidence?: string;
+  status?: string;
   selected?: boolean;
-  onSelect?: () => void;
+  onClick?: () => void;
 }
 
-export function MemoryCard({ memory, selected, onSelect }: MemoryCardProps) {
+const confidenceColors: Record<string, string> = {
+  explicit: "text-green-400",
+  observed: "text-blue-400",
+  inferred: "text-amber-400",
+  derived: "text-zinc-400",
+  uncertain: "text-zinc-500",
+};
+
+export function MemoryCard({ name, type, scope, confidence, status, selected, onClick }: MemoryCardProps) {
+  const confidenceColor = confidence ? confidenceColors[confidence] ?? "text-zinc-400" : "text-zinc-400";
+
   return (
     <button
-      type="button"
-      onClick={onSelect}
+      onClick={onClick}
       className={cn(
-        "w-full text-left rounded-lg border p-4 transition-colors",
-        "hover:bg-zinc-800/50",
-        selected
-          ? "border-zinc-500 bg-zinc-800/50"
-          : "border-zinc-800 bg-zinc-900/50",
-        typeColors[memory.type ?? ""] ?? "border-zinc-800",
+        "w-full text-left px-3 py-2 rounded-md transition-colors",
+        "hover:bg-zinc-800/50 border border-transparent",
+        selected && "bg-zinc-800 border-zinc-700",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-zinc-200 truncate">
-            {memory.name}
-          </div>
-          {memory.description && (
-            <div className="text-xs text-zinc-500 mt-1 line-clamp-2">
-              {memory.description}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {memory.type && (
-            <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-              {memory.type}
-            </span>
-          )}
-          {memory.confidence && (
-            <span
-              className={cn(
-                "w-1.5 h-1.5 rounded-full",
-                memory.confidence === "explicit"
-                  ? "bg-green-500"
-                  : memory.confidence === "inferred"
-                    ? "bg-amber-500"
-                    : "bg-zinc-500",
-              )}
-            />
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 mt-2 text-[10px] text-zinc-600">
-        {memory.scope && <span>{memory.scope}</span>}
-        {memory.recallCount !== undefined && (
-          <span>recalled {memory.recallCount}x</span>
-        )}
+      <div className="text-sm font-medium text-zinc-100 truncate">{name || "Untitled"}</div>
+      <div className="flex items-center gap-2 mt-1">
+        {type && <span className="text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">{type}</span>}
+        {scope && <span className="text-xs text-zinc-500">{scope}</span>}
+        {confidence && <span className={cn("text-xs", confidenceColor)}>{confidence}</span>}
+        {status === "archived" && <span className="text-xs text-zinc-500">ARCHIVED</span>}
       </div>
     </button>
   );

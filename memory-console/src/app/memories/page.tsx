@@ -2,110 +2,56 @@
 
 import { useState } from "react";
 import { useMemories } from "@/lib/hooks";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryCard } from "@/components/memory/MemoryCard";
 import { MemoryDetail } from "@/components/memory/MemoryDetail";
 import { MemoryFilter } from "@/components/memory/MemoryFilter";
-import type { FilterState } from "@/components/memory/MemoryFilter";
-import type { MemoryHeader } from "@/types/api";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const queryClient = new QueryClient();
 
-const defaultFilter: FilterState = {
-  scope: "",
-  type: "",
-  status: "",
-  search: "",
-};
-
 function ExplorerContent() {
-  const [filter, setFilter] = useState<FilterState>(defaultFilter);
-  const [selected, setSelected] = useState<MemoryHeader | null>(null);
-  const [detailData, setDetailData] = useState<unknown>(null);
-
-  const { data, isLoading, error } = useMemories({
-    scope: filter.scope || undefined,
-    type: filter.type || undefined,
-    search: filter.search || undefined,
-  });
+  const [search, setSearch] = useState("");
+  const [scope, setScope] = useState("all");
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const { data, isLoading } = useMemories({ search: search || undefined, scope: scope !== "all" ? scope : undefined });
 
   return (
     <div className="min-h-screen bg-black text-zinc-100">
       <header className="border-b border-zinc-800 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold">Memory Explorer</h1>
-            <p className="text-sm text-zinc-500">
-              Browse and inspect all memories
-            </p>
-          </div>
-          <a
-            href="/"
-            className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
-          >
-            &larr; Dashboard
-          </a>
+        <div className="flex items-center gap-4">
+          <a href="/" className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Dashboard</a>
+          <span className="text-zinc-700">/</span>
+          <h1 className="text-lg font-semibold">Memory Explorer</h1>
         </div>
       </header>
-
-      <div className="p-6 space-y-4">
-        <MemoryFilter filter={filter} onChange={setFilter} />
-
-        <div className="grid grid-cols-[1fr_400px] gap-6">
-          <div className="space-y-2">
-            {isLoading && (
-              <div className="text-sm text-zinc-500">Loading...</div>
-            )}
-            {error && (
-              <div className="text-sm text-red-400">
-                Failed to load memories
-              </div>
-            )}
-            {data?.memories.map((memory) => (
-              <MemoryCard
-                key={memory.filename}
-                memory={memory}
-                selected={selected?.filename === memory.filename}
-                onSelect={() => setSelected(memory)}
-              />
-            ))}
-            {data?.memories.length === 0 && (
-              <div className="text-sm text-zinc-500 text-center py-8">
-                No memories found
-              </div>
-            )}
-          </div>
-
-          <div className="sticky top-6">
-            {detailData ? (
-              <MemoryDetail
-                memory={detailData as any}
-                onClose={() => {
-                  setDetailData(null);
-                  setSelected(null);
-                }}
-              />
-            ) : selected ? (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-                <p className="text-sm text-zinc-500">
-                  Select a memory to view details
-                </p>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-                <p className="text-sm text-zinc-500">
-                  Select a memory to view details
-                </p>
-              </div>
-            )}
-          </div>
+      <div className="flex h-[calc(100vh-57px)]">
+        <div className="w-56 border-r border-zinc-800 flex-shrink-0">
+          <MemoryFilter search={search} onSearchChange={setSearch} scope={scope} onScopeChange={setScope} />
+        </div>
+        <div className="w-72 border-r border-zinc-800 overflow-y-auto flex-shrink-0">
+          {isLoading ? (
+            <div className="p-4 text-sm text-zinc-500">Loading...</div>
+          ) : !data?.memories.length ? (
+            <div className="p-4 text-sm text-zinc-500">{search ? "No memories match your search" : "No memories yet"}</div>
+          ) : (
+            <div className="p-2 space-y-0.5">
+              {data.memories.map((m) => (
+                <MemoryCard key={m.filename} filename={m.filename} name={m.name} type={m.type} scope={m.scope}
+                  confidence={m.confidence} status={m.status} selected={selectedFile === m.filename}
+                  onClick={() => setSelectedFile(m.filename)} />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <MemoryDetail filename={selectedFile} />
         </div>
       </div>
     </div>
   );
 }
 
-export default function ExplorerPage() {
+export default function MemoriesPage() {
   return (
     <QueryClientProvider client={queryClient}>
       <ExplorerContent />

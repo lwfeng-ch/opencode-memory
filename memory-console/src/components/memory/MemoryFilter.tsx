@@ -1,51 +1,27 @@
 "use client";
 
-export interface FilterState {
-  scope: string;
-  type: string;
-  status: string;
-  search: string;
-}
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface MemoryFilterProps {
-  filter: FilterState;
-  onChange: (filter: FilterState) => void;
+  search: string;
+  onSearchChange: (value: string) => void;
+  scope: string;
+  onScopeChange: (value: string) => void;
 }
 
-export function MemoryFilter({ filter, onChange }: MemoryFilterProps) {
-  const update = (field: keyof FilterState, value: string) => {
-    onChange({ ...filter, [field]: value });
-  };
-
+export function MemoryFilter({ search, onSearchChange, scope, onScopeChange }: MemoryFilterProps) {
   return (
-    <div className="flex items-center gap-3">
-      <input
-        type="text"
-        placeholder="Search memories..."
-        value={filter.search}
-        onChange={(e) => update("search", e.target.value)}
-        className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 transition-colors"
-      />
-      <select
-        value={filter.scope}
-        onChange={(e) => update("scope", e.target.value)}
-        className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-400 focus:outline-none focus:border-zinc-600 transition-colors"
-      >
-        <option value="">All scopes</option>
-        <option value="user">User</option>
-        <option value="project">Project</option>
-      </select>
-      <select
-        value={filter.type}
-        onChange={(e) => update("type", e.target.value)}
-        className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-400 focus:outline-none focus:border-zinc-600 transition-colors"
-      >
-        <option value="">All types</option>
-        <option value="user">User</option>
-        <option value="feedback">Feedback</option>
-        <option value="project">Project</option>
-        <option value="reference">Reference</option>
-      </select>
+    <div className="space-y-3 p-3">
+      <Input placeholder="Search memories..." value={search} onChange={(e) => onSearchChange(e.target.value)}
+        className="bg-zinc-900 border-zinc-800 text-sm text-zinc-100 placeholder:text-zinc-500" />
+      <Tabs value={scope} onValueChange={onScopeChange} className="w-full">
+        <TabsList className="bg-zinc-900 w-full">
+          <TabsTrigger value="all" className="text-xs flex-1">All</TabsTrigger>
+          <TabsTrigger value="user" className="text-xs flex-1">User</TabsTrigger>
+          <TabsTrigger value="project" className="text-xs flex-1">Project</TabsTrigger>
+        </TabsList>
+      </Tabs>
     </div>
   );
 }
